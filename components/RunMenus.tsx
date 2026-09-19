@@ -5,7 +5,7 @@ import { AnimatePresence, motion } from "framer-motion";
 import { ArrowLeft, ArrowRight, Check, Home, Music2, Play, RotateCcw, Settings2, Sparkles, Trophy, Volume2, Waves, X } from "lucide-react";
 import { AnimatedScore, formatScore } from "@/components/AnimatedScore";
 import type { FlightSimulation } from "@/game/simulation";
-import { DEFAULT_SETTINGS, selectReducedMotion, type GameSettings } from "@/store/gameStore";
+import { DEFAULT_SETTINGS, selectEffectiveQuality, selectReducedMotion, type GameSettings } from "@/store/gameStore";
 import { useGameStore } from "@/store/useGameStore";
 
 function RunSummary({ finished }: { finished: boolean }) {
@@ -43,6 +43,7 @@ function RecordCelebration() {
 
 function SettingsContent() {
   const settings = useGameStore((state) => state.settings);
+  const quality = useGameStore(selectEffectiveQuality);
   const reducedMotion = useGameStore(selectReducedMotion);
   const updateSettings = useGameStore((state) => state.updateSettings);
   const channels = [
@@ -54,7 +55,7 @@ function SettingsContent() {
   return (
     <div className="settings-content">
       <fieldset className="settings-section quality-setting">
-        <legend>GRAPHICS QUALITY</legend>
+        <legend>GRAPHICS QUALITY <span className="uppercase">RENDERING: {quality}</span></legend>
         <div className="quality-options">
           {(["low", "medium", "high"] as const).map((quality) => (
             <label key={quality} className="quality-option">
@@ -64,9 +65,14 @@ function SettingsContent() {
             </label>
           ))}
         </div>
+        <label className="motion-setting audio-mute-setting" htmlFor="adaptive-quality">
+          <span><Settings2 size={17} />Adaptive quality</span>
+          <input id="adaptive-quality" type="checkbox" role="switch" checked={settings.adaptiveQuality}
+            onChange={(event) => updateSettings({ adaptiveQuality: event.target.checked })} />
+        </label>
       </fieldset>
       <fieldset className="settings-section audio-setting">
-        <legend>AUDIO <span>STANDBY</span></legend>
+        <legend>AUDIO <span>{settings.muted ? "MUTED" : "ON"}</span></legend>
         {channels.map(({ key, label, icon: Icon }) => (
           <div className="volume-control" key={key}>
             <label htmlFor={key}><Icon size={16} />{label}<output htmlFor={key}>{Math.round(settings[key] * 100)}%</output></label>
@@ -76,6 +82,11 @@ function SettingsContent() {
               onChange={(event) => updateSettings({ [key]: Number(event.target.value) / 100 } as Partial<GameSettings>)} />
           </div>
         ))}
+        <label className="motion-setting audio-mute-setting" htmlFor="mute-audio">
+          <span><Volume2 size={17} />Mute audio</span>
+          <input id="mute-audio" type="checkbox" role="switch" checked={settings.muted}
+            onChange={(event) => updateSettings({ muted: event.target.checked })} />
+        </label>
       </fieldset>
       <label className="motion-setting" htmlFor="reduced-motion">
         <span><Sparkles size={17} />Reduced motion</span>
@@ -154,6 +165,7 @@ export function RunMenus({ simulation }: { simulation: FlightSimulation }) {
   const panel = useGameStore((state) => state.panel);
   const openPanel = useGameStore((state) => state.openPanel);
   const reducedMotion = useGameStore(selectReducedMotion);
+  const primaryAction = useRef<HTMLButtonElement>(null);
   const interaction = reducedMotion ? {} : { whileHover: { y: -2 }, whileTap: { scale: 0.97, y: 0 } };
 
   function startRun() {
@@ -177,13 +189,16 @@ export function RunMenus({ simulation }: { simulation: FlightSimulation }) {
             initial={{ opacity: 0, y: reducedMotion ? 0 : 16 }} animate={{ opacity: 1, y: 0 }}
             exit={{ opacity: 0, y: reducedMotion ? 0 : -8, pointerEvents: "none" }}
             transition={{ duration: reducedMotion ? 0 : 0.24 }}
+            onAnimationComplete={() => {
+              if (simulation.state.status === status && simulation.store.getState().panel === null) primaryAction.current?.focus({ preventScroll: true });
+            }}
             aria-label={status === "menu" ? "Launch flight" : status === "paused" ? "Flight paused" : "Run complete"}>
             <div className="eyebrow"><span className="eyebrow-line" />{status === "menu" ? "GRAVITY DIVISION / 001" : status === "paused" ? "FLIGHT ON HOLD" : "SIGNAL LOST"}</div>
             <h1 className={status === "menu" ? "neon-title" : "result-title"}>{status === "menu" ? <>NEON<br /><span>DRIFT</span><span className="title-period">.</span></> : status === "paused" ? <>HOLD<br /><span>STEADY.</span></> : <>RUN<br /><span>COMPLETE.</span></>}</h1>
             {status === "gameOver" && <RecordCelebration />}
             {status !== "menu" && <RunSummary finished={status === "gameOver"} />}
             <div className="run-actions">
-              <motion.button {...interaction} type="button" className="launch-button" disabled={!ready} onClick={startRun}>
+              <motion.button ref={primaryAction} {...interaction} type="button" className="launch-button" disabled={!ready} onClick={startRun}>
                 {status === "gameOver" ? <RotateCcw size={18} /> : <Play size={17} fill="currentColor" />}
                 <span>{!ready ? "INITIALIZING" : status === "menu" ? "PLAY" : status === "paused" ? "RESUME" : "RETRY"}</span><ArrowRight size={20} />
               </motion.button>

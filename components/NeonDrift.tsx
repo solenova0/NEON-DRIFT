@@ -1,12 +1,13 @@
 "use client";
 
 import dynamic from "next/dynamic";
-import { Component, useRef, useState, type ReactNode } from "react";
+import { Component, Fragment, useRef, useState, type ReactNode, type RefObject } from "react";
 import { useProgress } from "@react-three/drei";
 import { motion } from "framer-motion";
 import { DefaultLoadingManager } from "three";
-import { Zap } from "lucide-react";
+import { RotateCcw, Zap } from "lucide-react";
 import { FlightHud } from "@/components/FlightHud";
+import { useFlightAudio } from "@/hooks/useFlightAudio";
 import { useFlightInput } from "@/hooks/useFlightInput";
 import { useGamePreferences } from "@/hooks/useGamePreferences";
 import { useHighScorePersistence } from "@/hooks/useHighScorePersistence";
@@ -61,32 +62,80 @@ const GameScene = dynamic(async () => {
   }
 }, { ssr: false });
 
-class SceneBoundary extends Component<{ children: ReactNode }, { failed: boolean }> {
-  state = { failed: false };
+class SceneBoundary extends Component<{
+  simulation: FlightSimulation;
+  children: (onError: (error: Error) => void) => ReactNode;
+}, { failed: boolean; attempt: number }> {
+  state = { failed: false, attempt: 0 };
   static getDerivedStateFromError() { return { failed: true }; }
+
+  componentDidCatch() {
+    this.props.simulation.pause();
+    this.props.simulation.store.getState().setReady(false);
+    completePhysicsLoading();
+  }
+
+  handleError = () => {
+    this.props.simulation.pause();
+    this.props.simulation.store.getState().setReady(false);
+    completePhysicsLoading();
+    this.setState({ failed: true });
+  };
+
+  reconnect = () => {
+    const { simulation } = this.props;
+    simulation.returnToMenu();
+    simulation.store.getState().closePanel();
+    simulation.store.getState().updateSettings({ quality: "low" });
+    simulation.store.getState().setReady(false);
+    DefaultLoadingManager.itemStart("Physics sensors");
+    physicsLoadPending = true;
+    this.setState((current) => ({ failed: false, attempt: current.attempt + 1 }));
+  };
+
   render() {
     if (this.state.failed) {
-      return <div className="scene-error" role="alert"><h1>FLIGHT OFFLINE</h1><p>A WebGL2-capable browser with hardware acceleration is required.</p><button className="launch-button" onClick={() => location.reload()}>RECONNECT</button></div>;
+      return (
+        <section className="scene-error" role="alert" aria-labelledby="recovery-title">
+          <Zap size={34} /><h1 id="recovery-title">FLIGHT INTERRUPTED</h1>
+          <p>The renderer could not continue. Your saved records and settings are still available. Reconnect with lighter graphics, or reload in a WebGL2-capable browser with hardware acceleration.</p>
+          <button type="button" className="launch-button" autoFocus onClick={this.reconnect}><RotateCcw size={17} />RECONNECT</button>
+          <button type="button" className="secondary-button" onClick={() => location.reload()}>RELOAD PAGE</button>
+        </section>
+      );
     }
-    return this.props.children;
+    return <Fragment key={this.state.attempt}>{this.props.children(this.handleError)}</Fragment>;
   }
+}
+
+function FlightSession({ simulation, surface, onError }: {
+  simulation: FlightSimulation;
+  surface: RefObject<HTMLElement | null>;
+  onError: (error: Error) => void;
+}) {
+  useFlightInput(simulation, surface);
+  useFlightAudio(simulation, surface);
+  return (
+    <>
+      <div className="scene-viewport"><GameScene simulation={simulation} onReady={completePhysicsLoading} onError={onError} /></div>
+      <FlightHud simulation={simulation} />
+      <SceneLoading />
+    </>
+  );
 }
 
 export default function NeonDrift() {
   const [simulation] = useState(() => new FlightSimulation());
   const surface = useRef<HTMLElement>(null);
-  useFlightInput(simulation, surface);
   useHighScorePersistence(simulation.store);
   useGamePreferences(simulation.store);
 
   return (
     <GameStoreProvider store={simulation.store}>
       <main ref={surface} className="flight-shell" aria-label="Neon Drift gravity runner">
-      <SceneBoundary>
-        <div className="scene-viewport"><GameScene simulation={simulation} onReady={completePhysicsLoading} /></div>
-        <FlightHud simulation={simulation} />
-        <SceneLoading />
-      </SceneBoundary>
+        <SceneBoundary simulation={simulation}>
+          {(onError) => <FlightSession simulation={simulation} surface={surface} onError={onError} />}
+        </SceneBoundary>
       </main>
     </GameStoreProvider>
   );

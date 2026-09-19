@@ -12,6 +12,8 @@
     "start": "next start",
     "lint": "eslint",
     "typecheck": "tsc --noEmit",
+    "assets:audio": "node --experimental-strip-types scripts/generate-audio.ts",
+    "assets:branding": "node --experimental-strip-types scripts/generate-branding.ts",
     "test": "node --experimental-strip-types --test game/*.test.ts store/*.test.ts"
   },
   "dependencies": {
@@ -22,6 +24,7 @@
     "@react-three/postprocessing": "^3.1.1",
     "@react-three/rapier": "^2.2.0",
     "framer-motion": "^13.4.0",
+    "howler": "^2.2.4",
     "lucide-react": "^1.47.0",
     "next": "16.3.5",
     "react": "19.2.8",
@@ -31,12 +34,14 @@
   },
   "devDependencies": {
     "@tailwindcss/postcss": "^4",
+    "@types/howler": "^2.2.13",
     "@types/node": "^20",
     "@types/react": "^19",
     "@types/react-dom": "^19",
     "@types/three": "^0.186.0",
     "eslint": "^9",
     "eslint-config-next": "16.3.5",
+    "sharp": "^0.35.4",
     "tailwindcss": "^4",
     "typescript": "^5"
   }

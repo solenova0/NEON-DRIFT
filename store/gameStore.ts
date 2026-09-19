@@ -6,9 +6,11 @@ export type GameTransition = "start" | "pause" | "resume" | "finish" | "menu";
 
 export interface GameSettings {
   quality: QualityPreset;
+  adaptiveQuality: boolean;
   masterVolume: number;
   musicVolume: number;
   effectsVolume: number;
+  muted: boolean;
   reducedMotion: boolean | null;
 }
 
@@ -22,9 +24,11 @@ export interface RunRecord {
 
 export const DEFAULT_SETTINGS: GameSettings = {
   quality: "high",
+  adaptiveQuality: true,
   masterVolume: 0.8,
   musicVolume: 0.6,
   effectsVolume: 0.85,
+  muted: false,
   reducedMotion: null,
 };
 
@@ -39,6 +43,8 @@ function settingsPatch(value: unknown): Partial<GameSettings> {
     const volume = input[channel];
     if (typeof volume === "number" && Number.isFinite(volume)) patch[channel] = Math.max(0, Math.min(1, volume));
   }
+  if (typeof input.muted === "boolean") patch.muted = input.muted;
+  if (typeof input.adaptiveQuality === "boolean") patch.adaptiveQuality = input.adaptiveQuality;
   if (typeof input.reducedMotion === "boolean" || input.reducedMotion === null) patch.reducedMotion = input.reducedMotion;
   return patch;
 }
@@ -104,10 +110,12 @@ export interface GameState extends RunState {
   highScore: number;
   bestAtStart: number;
   settings: GameSettings;
+  qualityLimit: QualityPreset;
   systemReducedMotion: boolean;
   leaderboard: RunRecord[];
   panel: "settings" | "leaderboard" | null;
   updateSettings: (patch: Partial<GameSettings>) => void;
+  lowerQuality: () => boolean;
   setSystemReducedMotion: (reduced: boolean) => void;
   hydrateProfile: (profile: unknown) => void;
   openPanel: (panel: "settings" | "leaderboard") => boolean;
@@ -165,10 +173,24 @@ export function createGameStore() {
       highScore: 0,
       bestAtStart: 0,
       settings: { ...DEFAULT_SETTINGS },
+      qualityLimit: "high",
       systemReducedMotion: false,
       leaderboard: [],
       panel: null,
-      updateSettings: (patch) => set((current) => ({ settings: { ...current.settings, ...settingsPatch(patch) } })),
+      updateSettings: (patch) => {
+        const valid = settingsPatch(patch);
+        set((current) => ({
+          settings: { ...current.settings, ...valid },
+          qualityLimit: valid.quality !== undefined || valid.adaptiveQuality !== undefined ? "high" : current.qualityLimit,
+        }));
+      },
+      lowerQuality: () => {
+        const current = get();
+        const quality = selectEffectiveQuality(current);
+        if (!current.settings.adaptiveQuality || quality === "low") return false;
+        set({ qualityLimit: quality === "high" ? "medium" : "low" });
+        return true;
+      },
       setSystemReducedMotion: (systemReducedMotion) => set({ systemReducedMotion }),
       hydrateProfile: (profile) => {
         if (!profile || typeof profile !== "object") return;
@@ -265,3 +287,9 @@ export function createGameStore() {
 export type GameStore = ReturnType<typeof createGameStore>;
 
 export const selectReducedMotion = (state: GameState) => state.settings.reducedMotion ?? state.systemReducedMotion;
+
+export function selectEffectiveQuality(state: GameState): QualityPreset {
+  if (!state.settings.adaptiveQuality) return state.settings.quality;
+  const order: QualityPreset[] = ["low", "medium", "high"];
+  return order[Math.min(order.indexOf(state.settings.quality), order.indexOf(state.qualityLimit))];
+}

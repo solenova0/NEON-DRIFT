@@ -8,9 +8,27 @@ import "@fontsource/ibm-plex-mono/400.css";
 import "@fontsource/ibm-plex-mono/500.css";
 import "./globals.css";
 
+const title = "NEON DRIFT | Gravity Division";
+const description = "Flip gravity. Dodge the conduit. Chase your next record in a neon 3D endless runner with an original synth soundtrack.";
+const hostname = process.env.VERCEL_PROJECT_PRODUCTION_URL || process.env.VERCEL_URL;
+const siteUrl = new URL(process.env.NEXT_PUBLIC_SITE_URL || (hostname ? `https://${hostname}` : "http://localhost:3000"));
+if (!["http:", "https:"].includes(siteUrl.protocol)) throw new Error("NEXT_PUBLIC_SITE_URL must be an absolute HTTP(S) URL.");
+const indexable = process.env.VERCEL_ENV !== "preview";
+
 export const metadata: Metadata = {
-  title: "NEON DRIFT | Gravity Division",
-  description: "A neon endless runner. Pilot the conduit, flip gravity, and chase the next horizon.",
+  metadataBase: new URL(siteUrl.origin),
+  title,
+  description,
+  applicationName: "NEON DRIFT",
+  category: "games",
+  alternates: { canonical: "/" },
+  robots: { index: indexable, follow: indexable },
+  openGraph: {
+    type: "website", locale: "en_US", siteName: "NEON DRIFT", url: "/", title, description,
+    images: [{ url: "/og-image.png", width: 1200, height: 630,
+      alt: "NEON DRIFT's glowing craft inside a cyan neon tunnel, with the gravity-runner title and game controls." }],
+  },
+  twitter: { card: "summary_large_image", title, description, images: ["/og-image.png"] },
 };
 
 export const viewport: Viewport = {

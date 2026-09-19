@@ -2,8 +2,17 @@ export const GAME_CONFIG = {
   seed: 271828,
   speed: { initial: 22, maximum: 40 },
   difficulty: { timeConstant: 90 },
+  performance: { minimumFps: 45, sampleSeconds: 1, lowWindows: 3, warmupSeconds: 2, settleSeconds: 3 },
   scoring: { pointsPerMeter: 1, orbBonus: 100, orbsPerCombo: 3, maximumCombo: 5 },
   persistence: { key: "neon-drift.high-score.v1", profileKey: "neon-drift.profile.v1", saveInterval: 1000 },
+  audio: {
+    musicSource: "/audio/neon-drift.wav",
+    effectsSource: "/audio/effects.wav",
+    musicGain: 0.65,
+    effectsGain: 0.75,
+    maximumVoices: 8,
+    sprites: { collect: [0, 320], hit: [400, 420], flip: [900, 500], gameOver: [1500, 1500] },
+  },
   flight: {
     lanes: [-3.2, 0, 3.2],
     surfaceHeight: 2.65,

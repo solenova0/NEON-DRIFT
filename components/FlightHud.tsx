@@ -2,7 +2,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import { motion, useAnimationControls } from "framer-motion";
-import { ArrowLeft, ArrowRight, ArrowUpDown, Crosshair, Gauge, Maximize, Minimize, Pause, Play, Shield, Trophy, Zap } from "lucide-react";
+import { ArrowLeft, ArrowRight, ArrowUpDown, Crosshair, Gauge, Maximize, Minimize, Pause, Play, Shield, Trophy, Volume2, VolumeX, Zap } from "lucide-react";
 import { AnimatedScore, formatScore } from "@/components/AnimatedScore";
 import { RunMenus } from "@/components/RunMenus";
 import { GAME_CONFIG } from "@/game/config";
@@ -123,6 +123,18 @@ function FullscreenButton() {
   );
 }
 
+function MuteButton() {
+  const muted = useGameStore((state) => state.settings.muted);
+  const updateSettings = useGameStore((state) => state.updateSettings);
+  return (
+    <button type="button" className="icon-button" aria-label={muted ? "Unmute audio" : "Mute audio"}
+      aria-pressed={muted} title={muted ? "Unmute audio (M)" : "Mute audio (M)"}
+      onClick={() => updateSettings({ muted: !muted })}>
+      {muted ? <VolumeX size={18} /> : <Volume2 size={18} />}
+    </button>
+  );
+}
+
 function FlightHeader({ simulation }: { simulation: FlightSimulation }) {
   const status = useGameStore((state) => state.status);
   return (
@@ -133,7 +145,8 @@ function FlightHeader({ simulation }: { simulation: FlightSimulation }) {
       </button>
       <div className="sector-label"><span className="status-dot" /> THE CONDUIT <span className="sector-divider">/</span> SECTOR 01</div>
       <div className="header-actions">
-        <span className="build-label">FLIGHT SYSTEM 04</span>
+        <span className="build-label">FLIGHT SYSTEM 05</span>
+        <MuteButton />
         <FullscreenButton />
         <button type="button" className="icon-button" disabled={status !== "playing" && status !== "paused"}
           onClick={() => simulation.togglePause()} title={status === "paused" ? "Resume (Esc)" : "Pause (Esc)"}

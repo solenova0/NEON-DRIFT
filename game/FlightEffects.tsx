@@ -5,7 +5,7 @@ import { useFrame } from "@react-three/fiber";
 import { AdditiveBlending, Color, DynamicDrawUsage, InstancedMesh, MathUtils, MeshBasicMaterial, Object3D } from "three";
 import { GAME_CONFIG, QUALITY_PRESETS } from "@/game/config";
 import type { FlightSimulation } from "@/game/simulation";
-import { selectReducedMotion } from "@/store/gameStore";
+import { selectEffectiveQuality, selectReducedMotion } from "@/store/gameStore";
 
 export function FlightEffects({ simulation }: { simulation: FlightSimulation }) {
   const mesh = useRef<InstancedMesh>(null);
@@ -33,7 +33,7 @@ export function FlightEffects({ simulation }: { simulation: FlightSimulation }) 
       if (event.type !== "hit" && event.type !== "collect") return;
       const preferences = simulation.store.getState();
       if (selectReducedMotion(preferences)) return;
-      const budget = QUALITY_PRESETS[preferences.settings.quality].particles;
+      const budget = QUALITY_PRESETS[selectEffectiveQuality(preferences)].particles;
       const count = Math.ceil(budget * (event.type === "hit" ? 0.42 : 0.25));
       for (let index = 0; index < count; index += 1) {
         const particle = pool.particles[pool.cursor++ % budget];
@@ -61,7 +61,7 @@ export function FlightEffects({ simulation }: { simulation: FlightSimulation }) 
     const state = simulation.state;
     const preferences = simulation.store.getState();
     const reducedMotion = selectReducedMotion(preferences);
-    const preset = QUALITY_PRESETS[preferences.settings.quality];
+    const preset = QUALITY_PRESETS[selectEffectiveQuality(preferences)];
     const budget = reducedMotion ? 0 : preset.particles;
     const speedPower = MathUtils.smoothstep(state.speed, 29, GAME_CONFIG.speed.maximum);
     mesh.current.count = budget;

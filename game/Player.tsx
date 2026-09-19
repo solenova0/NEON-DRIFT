@@ -19,6 +19,8 @@ export function Player({ simulation }: { simulation: FlightSimulation }) {
     orange: new Color("#ff8158").multiplyScalar(3),
   }));
 
+  useEffect(() => () => resources.geometry.dispose(), [resources]);
+
   useEffect(() => simulation.subscribe((event) => {
     if (event.type === "hit") hitRemaining.current = GAME_CONFIG.effects.hitSeconds;
     if (event.type === "status" && simulation.state.time === 0) hitRemaining.current = 0;

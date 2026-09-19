@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { GAME_CONFIG } from "../game/config.ts";
-import { createGameStore, nextStatus, selectReducedMotion, type FlightTelemetry } from "./gameStore.ts";
+import { createGameStore, nextStatus, selectEffectiveQuality, selectReducedMotion, type FlightTelemetry } from "./gameStore.ts";
 
 function readyStore() {
   const store = createGameStore();
@@ -121,7 +121,7 @@ test("settings clamp volumes, validate presets, and survive every run reset", ()
   const actions = store.getState();
   actions.updateSettings({ quality: "low", masterVolume: -1, musicVolume: 2, effectsVolume: NaN });
   assert.deepEqual(store.getState().settings, {
-    quality: "low", masterVolume: 0, musicVolume: 1, effectsVolume: 0.85, reducedMotion: null,
+    quality: "low", adaptiveQuality: true, masterVolume: 0, musicVolume: 1, effectsVolume: 0.85, muted: false, reducedMotion: null,
   });
   actions.setSystemReducedMotion(true);
   assert.equal(selectReducedMotion(store.getState()), true);
@@ -150,6 +150,45 @@ test("settings and leaderboard panels block launching or resuming behind them", 
   assert.equal(actions.resumeRun(), false);
   actions.closePanel();
   assert.equal(actions.resumeRun(), true);
+});
+
+test("mute persists through resets and accepts only boolean profile values", () => {
+  const store = readyStore();
+  const actions = store.getState();
+  actions.hydrateProfile({ settings: { musicVolume: 0.3 } });
+  assert.equal(store.getState().settings.muted, false);
+  actions.updateSettings({ muted: true });
+  actions.startRun();
+  actions.pauseRun();
+  actions.returnToMenu();
+  assert.equal(store.getState().settings.muted, true);
+  actions.hydrateProfile({ settings: { muted: "false" } });
+  assert.equal(store.getState().settings.muted, true);
+  actions.hydrateProfile({ settings: { muted: false } });
+  assert.equal(store.getState().settings.muted, false);
+});
+
+test("adaptive quality respects the selected ceiling and resets only on a manual quality change", () => {
+  const store = readyStore();
+  const actions = store.getState();
+  assert.equal(actions.lowerQuality(), true);
+  assert.equal(selectEffectiveQuality(store.getState()), "medium");
+  assert.equal(store.getState().settings.quality, "high");
+  actions.startRun();
+  actions.returnToMenu();
+  assert.equal(selectEffectiveQuality(store.getState()), "medium");
+  actions.lowerQuality();
+  assert.equal(selectEffectiveQuality(store.getState()), "low");
+  assert.equal(actions.lowerQuality(), false);
+  actions.updateSettings({ muted: true });
+  assert.equal(selectEffectiveQuality(store.getState()), "low");
+  actions.updateSettings({ quality: "medium" });
+  assert.equal(selectEffectiveQuality(store.getState()), "medium");
+  actions.lowerQuality();
+  assert.equal(selectEffectiveQuality(store.getState()), "low");
+  actions.updateSettings({ adaptiveQuality: false });
+  assert.equal(selectEffectiveQuality(store.getState()), "medium");
+  assert.equal(actions.lowerQuality(), false);
 });
 
 test("completed runs are recorded once, ranked, capped, and retained after instant restart", () => {

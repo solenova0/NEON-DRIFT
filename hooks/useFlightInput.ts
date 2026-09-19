@@ -24,12 +24,13 @@ export function useFlightInput(
       }
       if (event.target instanceof Element && event.target.closest("input, textarea, select, [contenteditable=true]")) return;
       if (event.code === "Enter" && event.target instanceof Element && event.target.closest("button, a")) return;
-      const supported = ["Space", "ArrowLeft", "ArrowRight", "ArrowUp", "KeyA", "KeyD", "KeyW", "Escape", "KeyP", "Enter"];
+      const supported = ["Space", "ArrowLeft", "ArrowRight", "ArrowUp", "KeyA", "KeyD", "KeyW", "KeyM", "Escape", "KeyP", "Enter"];
       if (!supported.includes(event.code)) return;
       if (event.code === "Space" && simulation.state.status !== "playing" &&
         event.target instanceof Element && event.target.closest("button")) return;
       event.preventDefault();
       if (event.repeat) return;
+      if (event.code === "KeyM") state.updateSettings({ muted: !state.settings.muted });
       if (event.code === "ArrowLeft" || event.code === "KeyA") simulation.moveLane(-1);
       if (event.code === "ArrowRight" || event.code === "KeyD") simulation.moveLane(1);
       if (["Space", "ArrowUp", "KeyW"].includes(event.code)) simulation.requestFlip();

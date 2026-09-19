@@ -24,6 +24,8 @@ export function Tunnel({ simulation }: { simulation: FlightSimulation }) {
     orange: new Color("#ff8158").multiplyScalar(2.2),
   }));
 
+  useEffect(() => () => resources.walls.dispose(), [resources]);
+
   useEffect(() => {
     for (const mesh of [ribs.current, lights.current, laneMarks.current]) {
       mesh?.instanceMatrix.setUsage(DynamicDrawUsage);
