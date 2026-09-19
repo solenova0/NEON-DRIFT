@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { GAME_CONFIG } from "../game/config.ts";
 import { createGameStore, nextStatus, selectEffectiveQuality, selectReducedMotion, type FlightTelemetry } from "./gameStore.ts";
+import { summarizeRuns, validateRuns } from "./runHistory.ts";
 
 function readyStore() {
   const store = createGameStore();
@@ -121,7 +122,7 @@ test("settings clamp volumes, validate presets, and survive every run reset", ()
   const actions = store.getState();
   actions.updateSettings({ quality: "low", masterVolume: -1, musicVolume: 2, effectsVolume: NaN });
   assert.deepEqual(store.getState().settings, {
-    quality: "low", adaptiveQuality: true, masterVolume: 0, musicVolume: 1, effectsVolume: 0.85, muted: false, reducedMotion: null,
+    difficulty: "normal", quality: "low", adaptiveQuality: true, masterVolume: 0, musicVolume: 1, effectsVolume: 0.85, muted: false, showFeedback: false, reducedMotion: null,
   });
   actions.setSystemReducedMotion(true);
   assert.equal(selectReducedMotion(store.getState()), true);
@@ -223,4 +224,49 @@ test("profile hydration discards invalid records and keeps a recovered personal 
   assert.equal(store.getState().highScore, 450);
   store.getState().hydrateProfile(null);
   assert.equal(store.getState().leaderboard.length, 1);
+});
+
+test("playtest history captures deaths before resets and archives abandoned runs exactly once", () => {
+  const store = readyStore();
+  const actions = store.getState();
+  actions.startRun();
+  actions.syncTelemetry(telemetry(GAME_CONFIG.speed.initial * 20));
+  actions.recordFlip();
+  for (let index = 0; index < 3; index += 1) actions.collectOrb();
+  const death = { obstacle: "barrier" as const, chunkIndex: 4, position: { x: 3.2, y: -2.65, z: 0 }, distance: 440 };
+  for (let index = 0; index < 4; index += 1) actions.recordHit(death);
+  const run = store.getState().runHistory[0];
+  assert.equal(run.duration, 20);
+  assert.equal(run.flips, 1);
+  assert.equal(run.orbs, 3);
+  assert.equal(run.maxCombo, 2);
+  assert.deepEqual(run.death, death);
+  death.position.x = 0;
+  assert.equal(run.death?.position.x, 3.2);
+  actions.recordHit();
+  actions.finishRun();
+  actions.returnToMenu();
+  assert.equal(store.getState().runHistory.length, 1);
+  actions.startRun();
+  actions.pauseRun();
+  actions.returnToMenu();
+  assert.equal(store.getState().runHistory.length, 2);
+  assert.equal(store.getState().runHistory[1].ending, "abandoned");
+});
+
+test("run reports retain the last 50 validated records and exclude unfinished runs from death rates", () => {
+  const store = readyStore();
+  const actions = store.getState();
+  actions.startRun();
+  actions.syncTelemetry(telemetry(GAME_CONFIG.speed.initial * 20));
+  for (let index = 0; index < 4; index += 1) actions.recordHit({ obstacle: "laser", chunkIndex: 0, position: { x: 0, y: -2.65, z: 0 }, distance: 440 });
+  const original = store.getState().runHistory[0];
+  const records = Array.from({ length: 55 }, (_, index) => ({ ...original, id: String(index), endedAt: index }));
+  assert.equal(validateRuns([...records, null, { ...original, duration: -1 }]).length, 50);
+  assert.equal(validateRuns(records)[0].id, "5");
+  const report = summarizeRuns([original, { ...original, id: "abandoned", ending: "abandoned", duration: 500, death: null }]);
+  assert.equal(report.averageSurvival, 20);
+  assert.equal(report.causes[0].obstacle, "laser");
+  assert.equal(report.windows.find((window) => window.start === 20)?.count, 1);
+  assert.equal(summarizeRuns([]).averageSurvival, null);
 });

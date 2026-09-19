@@ -14,6 +14,7 @@ import { FrameMonitor } from "@/game/performance";
 import type { FlightSimulation } from "@/game/simulation";
 import { selectEffectiveQuality, selectReducedMotion } from "@/store/gameStore";
 import { useGameStore } from "@/store/useGameStore";
+import { THEME } from "@/game/theme";
 
 const chromaticOffset = new Vector2(0.00035, 0.00035);
 const noChromaticOffset = new Vector2(0, 0);
@@ -40,6 +41,7 @@ function ContextGuard({ onError }: { onError: (error: Error) => void }) {
 function ScenePerformance({ simulation }: { simulation: FlightSimulation }) {
   const getScene = useThree((state) => state.get);
   const monitor = useRef(new FrameMonitor());
+  const fpsWindow = useRef({ seconds: 0, frames: 0 });
   const stats = useRef({ fps: 0, drawCalls: 0, triangles: 0, geometries: 0, textures: 0, downgrades: 0, quality: "high" });
 
   useEffect(() => {
@@ -61,6 +63,18 @@ function ScenePerformance({ simulation }: { simulation: FlightSimulation }) {
 
   useFrame(({ gl: renderer }, delta) => {
     const state = simulation.store.getState();
+    if (state.debugEnabled && !document.hidden) {
+      fpsWindow.current.seconds += delta;
+      fpsWindow.current.frames += 1;
+      if (fpsWindow.current.seconds >= 1) {
+        state.setDebugFps(Math.round(fpsWindow.current.frames / fpsWindow.current.seconds));
+        fpsWindow.current.seconds = 0;
+        fpsWindow.current.frames = 0;
+      }
+    } else {
+      fpsWindow.current.seconds = 0;
+      fpsWindow.current.frames = 0;
+    }
     const active = state.ready && !document.hidden && document.hasFocus() && state.status !== "paused" && state.status !== "gameOver" && state.panel === null;
     const report = monitor.current.sample(delta, active);
     if (report) {
@@ -105,17 +119,17 @@ export default function GameScene({ simulation, onReady, onError }: {
       dpr={[1, preset.dpr]}
       gl={{ antialias: false, alpha: false, powerPreference: "high-performance" }}
       onCreated={({ gl, scene, camera }) => {
-        gl.setClearColor("#070d10");
+        gl.setClearColor(THEME.palette.background);
         if (process.env.NODE_ENV === "development") {
           Object.assign(gl.domElement, { __neon: simulation, __renderer: gl, __scene: scene, __camera: camera });
         }
       }}>
-      <color attach="background" args={["#070d10"]} />
-      <fog attach="fog" args={["#070d10", 40, 192]} />
-      <ambientLight intensity={1.35} color="#c5f6ee" />
-      <directionalLight position={[4, 6, 7]} intensity={3.5} color="#e4fff5" />
-      <pointLight position={[0, -1, -15]} color="#3dddcf" intensity={75} distance={35} />
-      <pointLight position={[0, 2, -45]} color="#ff795b" intensity={95} distance={40} />
+      <color attach="background" args={[THEME.palette.background]} />
+      <fog attach="fog" args={[THEME.palette.background, 40, 192]} />
+      <ambientLight intensity={THEME.lighting.ambient} color={THEME.palette.text} />
+      <directionalLight position={[4, 6, 7]} intensity={THEME.lighting.key} color={THEME.palette.text} />
+      <pointLight position={[0, -1, -15]} color={THEME.palette.primary} intensity={THEME.lighting.near} distance={35} />
+      <pointLight position={[0, 2, -45]} color={THEME.palette.secondary} intensity={THEME.lighting.far} distance={40} />
       <ContextGuard onError={onError} />
       <ScenePerformance simulation={simulation} />
       <Tunnel simulation={simulation} />
@@ -127,7 +141,7 @@ export default function GameScene({ simulation, onReady, onError }: {
         <PhysicsWorld simulation={simulation} onReady={onReady} />
       </Suspense>
       {quality !== "low" && <EffectComposer multisampling={0}>
-        <Bloom intensity={preset.bloom} luminanceThreshold={1}
+        <Bloom intensity={preset.bloom * THEME.glow.bloom} luminanceThreshold={1}
           luminanceSmoothing={0.15} mipmapBlur levels={preset.bloomLevels} />
         <ChromaticAberration offset={quality === "high" && !reducedMotion ? chromaticOffset : noChromaticOffset} radialModulation={false} modulationOffset={0} />
         <Vignette eskil={false} offset={0.18} darkness={0.65} />

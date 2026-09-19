@@ -15,7 +15,7 @@ import {
   type RapierRigidBody,
 } from "@react-three/rapier";
 import { GAME_CONFIG, OBSTACLE_CAPACITY, ORB_CAPACITY } from "@/game/config";
-import { obstacleX } from "@/game/patterns";
+import { obstacleX, type ObstacleSlot } from "@/game/patterns";
 import type { FlightSimulation } from "@/game/simulation";
 import { useGameStore } from "@/store/useGameStore";
 
@@ -104,6 +104,12 @@ function SensorPool({ simulation, onReady }: { simulation: FlightSimulation; onR
     }
   });
 
+  function measureGap(slot: ObstacleSlot) {
+    const collider = handlesRef.current.obstacleColliders[slot.id];
+    if (!collider || !playerCollider.current) return Infinity;
+    return playerCollider.current.contactCollider(collider, GAME_CONFIG.nearMiss.clearance)?.distance ?? Infinity;
+  }
+
   useAfterPhysicsStep(() => {
     if (!playerCollider.current) return;
     const handles = handlesRef.current;
@@ -114,6 +120,7 @@ function SensorPool({ simulation, onReady }: { simulation: FlightSimulation; onR
       if (slotId >= 0) simulation.hit(simulation.pool.obstacles[slotId]);
       else simulation.collect(simulation.pool.orbs[-slotId - 1]);
     });
+    simulation.checkNearMisses(measureGap);
   });
 
   const collisionTypes = rapier.ActiveCollisionTypes.ALL;

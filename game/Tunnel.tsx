@@ -7,6 +7,7 @@ import { GAME_CONFIG } from "@/game/config";
 import { createTunnelGeometry, TUNNEL_PROFILE } from "@/game/geometry";
 import type { FlightSimulation } from "@/game/simulation";
 import { selectReducedMotion } from "@/store/gameStore";
+import { THEME } from "@/game/theme";
 
 const RING_COUNT = 20;
 const RING_SPACING = 12;
@@ -20,8 +21,8 @@ export function Tunnel({ simulation }: { simulation: FlightSimulation }) {
   const transformRef = useRef(new Object3D());
   const [resources] = useState(() => ({
     walls: createTunnelGeometry(),
-    cyan: new Color("#51dbd5").multiplyScalar(2.1),
-    orange: new Color("#ff8158").multiplyScalar(2.2),
+    cyan: new Color(THEME.palette.primary).multiplyScalar(THEME.glow.ribs),
+    orange: new Color(THEME.palette.secondary).multiplyScalar(THEME.glow.secondary),
   }));
 
   useEffect(() => () => resources.walls.dispose(), [resources]);
@@ -80,12 +81,12 @@ export function Tunnel({ simulation }: { simulation: FlightSimulation }) {
   return (
     <group>
       <mesh geometry={resources.walls}>
-        <meshStandardMaterial color="#101619" emissive="#091719" emissiveIntensity={0.4}
+        <meshStandardMaterial color={THEME.palette.wall} emissive={THEME.palette.glass} emissiveIntensity={THEME.glow.wall}
           roughness={0.55} metalness={0.65} side={DoubleSide} />
       </mesh>
       <instancedMesh ref={ribs} args={[undefined, undefined, BEAM_COUNT]} frustumCulled={false}>
         <boxGeometry />
-        <meshStandardMaterial color="#263438" metalness={0.8} roughness={0.4} />
+        <meshStandardMaterial color={THEME.palette.metal} metalness={0.8} roughness={0.4} />
       </instancedMesh>
       <instancedMesh ref={lights} args={[undefined, undefined, BEAM_COUNT]} frustumCulled={false}>
         <boxGeometry />

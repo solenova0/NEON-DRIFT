@@ -7,6 +7,7 @@ import { GAME_CONFIG, OBSTACLE_CAPACITY, ORB_CAPACITY, type ObstacleKind } from 
 import { createFrameGeometry } from "@/game/geometry";
 import { obstacleX } from "@/game/patterns";
 import type { FlightSimulation } from "@/game/simulation";
+import { THEME } from "@/game/theme";
 
 const kinds: ObstacleKind[] = ["block", "barrier", "laser"];
 
@@ -23,11 +24,11 @@ export function ObstacleField({ simulation }: { simulation: FlightSimulation }) 
   const [resources] = useState(() => ({
     frame: createFrameGeometry(),
     colors: {
-      block: new Color("#ffae51").multiplyScalar(2.2),
-      barrier: new Color("#ff538f").multiplyScalar(2.2),
-      laser: new Color("#ff4937").multiplyScalar(2.5),
+      block: new Color(THEME.obstacles.block).multiplyScalar(THEME.glow.obstacle),
+      barrier: new Color(THEME.obstacles.barrier).multiplyScalar(THEME.glow.obstacle),
+      laser: new Color(THEME.obstacles.laser).multiplyScalar(THEME.glow.obstacle),
     },
-    energyColor: new Color("#d9ff82").multiplyScalar(2.4),
+    energyColor: new Color(THEME.palette.orb).multiplyScalar(THEME.glow.orb),
   }));
 
   useEffect(() => () => resources.frame.dispose(), [resources]);
@@ -114,10 +115,10 @@ export function ObstacleField({ simulation }: { simulation: FlightSimulation }) 
           <instancedMesh name={`${kind}-bodies`} ref={(mesh) => { meshes.current[kind].body = mesh; }}
             args={[undefined, undefined, OBSTACLE_CAPACITY]} frustumCulled={false}>
             <boxGeometry />
-            <meshStandardMaterial color={kind === "laser" ? "#ff3322" : "#232a2c"}
-              emissive={kind === "laser" ? "#ff3322" : "#151417"}
-              emissiveIntensity={kind === "laser" ? 1.3 : 0.15}
-              transparent={kind === "laser"} opacity={kind === "laser" ? 0.16 : 1}
+            <meshStandardMaterial color={kind === "laser" ? THEME.obstacles.laser : THEME.palette.metal}
+              emissive={THEME.obstacles[kind]}
+              emissiveIntensity={kind === "laser" ? THEME.glow.laser : THEME.glow.wall}
+              transparent={kind === "laser"} opacity={kind === "laser" ? 0.28 : 1}
               depthWrite={kind !== "laser"} metalness={0.65} roughness={0.4} />
           </instancedMesh>
         </group>

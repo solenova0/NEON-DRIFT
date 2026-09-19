@@ -1,5 +1,6 @@
 import type { Metadata, Viewport } from "next";
-import type { ReactNode } from "react";
+import type { CSSProperties, ReactNode } from "react";
+import { THEME, THEME_CSS } from "@/game/theme";
 import "@fontsource/space-grotesk/400.css";
 import "@fontsource/space-grotesk/500.css";
 import "@fontsource/space-grotesk/600.css";
@@ -26,22 +27,25 @@ export const metadata: Metadata = {
   openGraph: {
     type: "website", locale: "en_US", siteName: "NEON DRIFT", url: "/", title, description,
     images: [{ url: "/og-image.png", width: 1200, height: 630,
-      alt: "NEON DRIFT's glowing craft inside a cyan neon tunnel, with the gravity-runner title and game controls." }],
+      alt: "NEON DRIFT title beside its glowing craft inside a cyan neon tunnel." }],
   },
-  twitter: { card: "summary_large_image", title, description, images: ["/og-image.png"] },
+  twitter: {
+    card: "summary_large_image", title, description,
+    images: [{ url: "/og-image.png", alt: "NEON DRIFT title beside its glowing craft inside a cyan neon tunnel." }],
+  },
 };
 
 export const viewport: Viewport = {
   width: "device-width",
   initialScale: 1,
   viewportFit: "cover",
-  themeColor: "#080d0f",
+  themeColor: THEME.palette.background,
   colorScheme: "dark",
 };
 
 export default function RootLayout({ children }: { children: ReactNode }) {
   return (
-    <html lang="en">
+    <html lang="en" style={THEME_CSS as CSSProperties}>
       <body>{children}</body>
     </html>
   );

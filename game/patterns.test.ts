@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { GAME_CONFIG } from "./config.ts";
+import { DIFFICULTY_PRESETS, GAME_CONFIG, type DifficultyPreset } from "./config.ts";
 import { difficultyAt, timeAtDistance } from "./difficulty.ts";
 import {
   INITIAL_ROUTE,
@@ -12,28 +12,38 @@ import {
   resetChunkPool,
   validateChunk,
   writeChunk,
+  unlockHardPatterns,
 } from "./patterns.ts";
 
-test("3,072 seeded chunks have a reachable route across every boundary at maximum speed", () => {
+test("9,216 seeded chunks have readable reachable routes at every preset's maximum speed", () => {
   const kinds = new Set<string>();
   let flips = 0;
+  for (const preset of Object.keys(DIFFICULTY_PRESETS) as DifficultyPreset[]) {
+  const tuning = DIFFICULTY_PRESETS[preset];
   for (let seed = 1; seed <= 64; seed += 1) {
     const chunk = createChunk(0);
     let entry = { ...INITIAL_ROUTE };
     for (let index = 0; index < 48; index += 1) {
-      writeChunk(chunk, index, seed, entry);
+      writeChunk(chunk, index, seed, entry, preset);
       assert.equal(chunk.fallback, false, `unexpected fallback: seed ${seed}, chunk ${index}`);
       assert.equal(validateChunk(chunk, entry).valid, true);
       let previous = entry;
       for (const row of chunk.rows) {
         assert.ok(isCellSafe(row, row.route.lane, row.route.surface));
-        assert.ok(canReachCell(previous, row.route.lane, row.route.surface, row.index));
+        assert.ok(canReachCell(previous, row.route.lane, row.route.surface, row.index, tuning.maximumSpeed, tuning.rowSpacing));
+        assert.ok(Math.abs(row.route.lane - previous.lane) <= GAME_CONFIG.fairness.maximumLaneSteps);
+        assert.ok(row.obstacles.filter((slot) => slot.active && slot.kind === "barrier").length <= 1);
+        if (row.obstacles.some((slot) => slot.active && slot.kind === "laser")) {
+          assert.equal(row.route.lane, previous.lane);
+          assert.equal(row.obstacles.filter((slot) => slot.active && slot.surface === row.route.surface).length, 0);
+        }
         if (row.route.surface !== previous.surface) flips += 1;
         for (const obstacle of row.obstacles) if (obstacle.active) kinds.add(obstacle.kind);
         previous = row.route;
       }
       entry = { ...previous };
     }
+  }
   }
   assert.deepEqual([...kinds].sort(), ["barrier", "block", "laser"]);
   assert.ok(flips >= 3072);
@@ -86,6 +96,7 @@ test("spawn density follows arrival time smoothly across every chunk boundary", 
   const chunk = createChunk(0);
   let entry = { ...INITIAL_ROUTE };
   let previousDensity = GAME_CONFIG.spawn.density as number;
+  let previousTime = 0;
   let earlyObstacles = 0;
   let lateObstacles = 0;
   for (let index = 0; index < 80; index += 1) {
@@ -94,7 +105,12 @@ test("spawn density follows arrival time smoothly across every chunk boundary", 
     for (const row of chunk.rows) {
       assert.equal(row.density, difficultyAt(timeAtDistance(row.orb.distance)).density);
       assert.ok(row.density >= previousDensity);
-      assert.ok(row.density - previousDensity < (row.index === 0 ? 0.02 : 0.009));
+      const arrival = timeAtDistance(row.orb.distance);
+      const tuning = DIFFICULTY_PRESETS.normal;
+      const maximumRate = Math.max(1.5 * (tuning.cruiseDensity - tuning.initialDensity) / GAME_CONFIG.onboarding.seconds,
+        (tuning.maximumDensity - tuning.cruiseDensity) / tuning.timeConstant);
+      assert.ok(row.density - previousDensity <= maximumRate * (arrival - previousTime) + 1e-10);
+      previousTime = arrival;
       previousDensity = row.density;
       const occupied = row.obstacles.filter((slot) => slot.active).length;
       if (index < 10) earlyObstacles += occupied;
@@ -103,4 +119,33 @@ test("spawn density follows arrival time smoothly across every chunk boundary", 
     entry = { ...chunk.rows.at(-1)!.route };
   }
   assert.ok(lateObstacles > earlyObstacles);
+});
+
+test("every preset offers its first flip within five seconds and remains gentle until a completed flip", () => {
+  for (const preset of Object.keys(DIFFICULTY_PRESETS) as DifficultyPreset[]) {
+    const pool = createChunkPool(42, preset);
+    const first = pool.chunks[0].rows[0];
+    assert.equal(first.orb.surface, 1);
+    assert.ok(timeAtDistance(first.orb.distance, preset) <= 5);
+    assert.equal(first.obstacles.filter((slot) => slot.active).length, 1);
+    assert.equal(isCellSafe(first, 0, -1), true);
+    assert.equal(isCellSafe(first, 2, -1), true);
+    for (let distance = 0; distance < 4000; distance += 100) {
+      recycleChunks(pool, distance);
+      assert.ok(pool.obstacles.every((slot) => !slot.active || slot.kind === "block"));
+    }
+  }
+});
+
+test("the first completed flip unlocks only unseen chunks and never hardens the first 20 seconds", () => {
+  const pool = createChunkPool();
+  const visible = pool.obstacles.filter((slot) => slot.distance <= 80 + GAME_CONFIG.spawn.visibleDistance);
+  const before = JSON.stringify(visible);
+  unlockHardPatterns(pool, 80);
+  assert.equal(JSON.stringify(visible), before);
+  assert.equal(pool.hasFlipped, true);
+  assert.ok(pool.obstacles.some((slot) => slot.active && slot.kind === "laser"));
+  assert.ok(pool.obstacles.every((slot) => timeAtDistance(slot.distance) >= GAME_CONFIG.onboarding.seconds || !slot.active || slot.kind === "block"));
+  resetChunkPool(pool);
+  assert.equal(pool.hasFlipped, false);
 });

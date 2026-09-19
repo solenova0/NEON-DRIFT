@@ -1,10 +1,11 @@
-import { GAME_CONFIG, type Surface } from "./config.ts";
+import { GAME_CONFIG, type DifficultyPreset, type Surface } from "./config.ts";
 import { difficultyAt, distanceAtTime } from "./difficulty.ts";
-import { createGameStore, type GameStatus, type GameStore } from "../store/gameStore.ts";
+import { createGameStore, selectReducedMotion, type GameStatus, type GameStore } from "../store/gameStore.ts";
 import {
   createChunkPool,
   recycleChunks,
   resetChunkPool,
+  unlockHardPatterns,
   type ObstacleSlot,
   type OrbSlot,
 } from "./patterns.ts";
@@ -12,6 +13,10 @@ import {
 export interface FlightState {
   readonly status: GameStatus;
   time: number;
+  aliveTime: number;
+  timeScale: number;
+  slowMotionRemaining: number;
+  lastNearMissAt: number;
   distance: number;
   speed: number;
   density: number;
@@ -42,14 +47,19 @@ export type GameEvent =
   | { type: "hit"; shield: number; x: number; y: number; z: number }
   | { type: "collect"; energy: number; score: number; combo: number; bonus: number; x: number; y: number; z: number }
   | { type: "flip"; surface: Surface }
+  | { type: "nearMiss"; bonus: number; x: number; y: number; z: number }
   | { type: "status"; status: GameStatus };
 
-function initialMotion(): Omit<FlightState, "status" | "shield" | "energy" | "hits" | "pickups"> {
+function initialMotion(preset: DifficultyPreset = "normal"): Omit<FlightState, "status" | "shield" | "energy" | "hits" | "pickups"> {
   return {
     time: 0,
+    aliveTime: 0,
+    timeScale: 1,
+    slowMotionRemaining: 0,
+    lastNearMissAt: -100,
     distance: 0,
-    speed: GAME_CONFIG.speed.initial,
-    density: GAME_CONFIG.spawn.density,
+    speed: difficultyAt(0, preset).speed,
+    density: difficultyAt(0, preset).density,
     x: 0,
     y: -GAME_CONFIG.flight.surfaceHeight,
     z: 0,
@@ -92,8 +102,8 @@ export class FlightSimulation {
     };
     store.subscribe((current, previous) => {
       if (current.runId !== previous.runId) {
-        Object.assign(this.state, initialMotion());
-        resetChunkPool(this.pool);
+        Object.assign(this.state, initialMotion(current.runDifficulty));
+        resetChunkPool(this.pool, this.pool.seed, current.runDifficulty);
       }
       if (current.status !== previous.status) this.emit({ type: "status", status: current.status });
     });
@@ -131,6 +141,7 @@ export class FlightSimulation {
     const state = this.state;
     this.store.getState().syncTelemetry({
       elapsed: state.time,
+      aliveTime: state.aliveTime,
       distance: state.distance,
       speed: state.speed,
       density: state.density,
@@ -181,7 +192,12 @@ export class FlightSimulation {
     }
     obstacle.spent = true;
     this.publishTelemetry();
-    this.store.getState().recordHit();
+    this.store.getState().recordHit({
+      obstacle: obstacle.kind,
+      chunkIndex: obstacle.chunkIndex,
+      position: { x: this.state.x, y: this.state.y, z: this.state.z - this.state.distance },
+      distance: this.state.distance,
+    });
     this.state.lastHitAt = this.state.time;
     this.state.invulnerableUntil = this.state.time + GAME_CONFIG.shield.recoverySeconds;
     this.emit({
@@ -205,15 +221,51 @@ export class FlightSimulation {
     return true;
   }
 
+  checkNearMisses(measureGap: (obstacle: ObstacleSlot) => number) {
+    const state = this.state;
+    if (state.status !== "playing") return;
+    for (const obstacle of this.pool.obstacles) {
+      if (!obstacle.active || obstacle.nearMissChecked) continue;
+      const relativeZ = state.distance - obstacle.distance - state.z;
+      const depth = GAME_CONFIG.obstacles[obstacle.kind].z + GAME_CONFIG.flight.playerHalfExtents.z;
+      if (relativeZ > depth) {
+        obstacle.nearMissChecked = true;
+        if (obstacle.spent || !obstacle.nearMissEligible || this.invulnerable
+          || obstacle.nearMissGap < GAME_CONFIG.nearMiss.minimumClearance || obstacle.nearMissGap > GAME_CONFIG.nearMiss.clearance
+          || state.aliveTime - state.lastNearMissAt < GAME_CONFIG.nearMiss.cooldownSeconds) continue;
+        this.publishTelemetry();
+        const bonus = this.store.getState().recordNearMiss();
+        state.lastNearMissAt = state.aliveTime;
+        if (!selectReducedMotion(this.store.getState())) {
+          state.slowMotionRemaining = GAME_CONFIG.nearMiss.slowSeconds;
+          state.timeScale = GAME_CONFIG.nearMiss.timeScale;
+        }
+        this.emit({ type: "nearMiss", bonus, x: state.x, y: state.y, z: state.z });
+      } else if (relativeZ >= -depth) {
+        if (obstacle.spent || this.invulnerable) obstacle.nearMissEligible = false;
+        const gap = measureGap(obstacle);
+        if (Number.isFinite(gap)) {
+          obstacle.nearMissGap = Math.min(obstacle.nearMissGap, gap);
+          if (gap < GAME_CONFIG.nearMiss.minimumClearance) obstacle.nearMissEligible = false;
+        }
+      }
+    }
+  }
+
   step(seconds: number) {
     const state = this.state;
     if (state.status !== "playing" || !Number.isFinite(seconds) || seconds <= 0) return;
+    state.aliveTime += seconds;
+    state.timeScale = state.slowMotionRemaining > 1e-8 && !selectReducedMotion(this.store.getState()) ? GAME_CONFIG.nearMiss.timeScale : 1;
+    state.slowMotionRemaining = Math.max(0, state.slowMotionRemaining - seconds);
+    seconds *= state.timeScale;
     const previousTime = state.time;
     state.time += seconds;
-    const difficulty = difficultyAt(state.time);
+    const preset = this.store.getState().runDifficulty;
+    const difficulty = difficultyAt(state.time, preset);
     state.speed = difficulty.speed;
     state.density = difficulty.density;
-    state.distance += distanceAtTime(state.time) - distanceAtTime(previousTime);
+    state.distance += distanceAtTime(state.time, preset) - distanceAtTime(previousTime, preset);
 
     state.laneElapsed = Math.min(state.laneDuration, state.laneElapsed + seconds);
     const laneProgress = state.laneDuration === 0 ? 1 : smoothstep(state.laneElapsed / state.laneDuration);
@@ -229,6 +281,8 @@ export class FlightSimulation {
       state.roll = state.flipStartRoll + Math.PI * eased;
       if (progress >= 1 - 1e-8) {
         state.flipping = false;
+        this.store.getState().recordFlip();
+        unlockHardPatterns(this.pool, state.distance);
         state.y = state.surface * GAME_CONFIG.flight.surfaceHeight;
         state.z = 0;
         state.roll = state.flipStartRoll + Math.PI;

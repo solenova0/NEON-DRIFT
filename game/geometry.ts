@@ -45,10 +45,13 @@ export function createTunnelGeometry() {
 
 export function createCraftGeometry() {
   const points = [
-    [0, 0.03, -1.05], [-0.74, -0.14, 0.65], [0.74, -0.14, 0.65],
-    [0, 0.22, 0.52], [0, -0.28, 0.5], [0, 0.05, 0.86],
+    [0, 0.02, -1.05], [-0.42, 0, -0.24], [-0.8, -0.08, 0.64], [-0.34, 0.03, 0.44],
+    [0, 0, 0.78], [0.34, 0.03, 0.44], [0.8, -0.08, 0.64], [0.42, 0, -0.24],
+    [0, 0.24, -0.15], [0, -0.2, 0.08],
   ];
-  const faces = [[0, 1, 3], [0, 3, 2], [0, 4, 1], [0, 2, 4], [1, 4, 5], [1, 5, 3], [3, 5, 2], [2, 5, 4]];
+  const faces = Array.from({ length: 8 }, (_, index) => [
+    [8, index, (index + 1) % 8], [9, (index + 1) % 8, index],
+  ]).flat();
   const geometry = new BufferGeometry();
   geometry.setAttribute("position", new Float32BufferAttribute(faces.flatMap((face) => face.flatMap((index) => points[index])), 3));
   geometry.computeVertexNormals();

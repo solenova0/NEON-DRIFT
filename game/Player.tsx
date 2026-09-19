@@ -2,24 +2,26 @@
 
 import { useEffect, useRef, useState } from "react";
 import { useFrame } from "@react-three/fiber";
-import { Color, Group, MathUtils, Mesh, PerspectiveCamera } from "three";
-import { GAME_CONFIG } from "@/game/config";
+import { Color, EdgesGeometry, Group, MathUtils, Mesh, MeshBasicMaterial, PerspectiveCamera } from "three";
+import { DIFFICULTY_PRESETS, GAME_CONFIG } from "@/game/config";
 import { createCraftGeometry } from "@/game/geometry";
 import type { FlightSimulation } from "@/game/simulation";
 import { selectReducedMotion } from "@/store/gameStore";
+import { THEME, comboColor } from "@/game/theme";
 
 export function Player({ simulation }: { simulation: FlightSimulation }) {
   const craft = useRef<Group>(null);
   const shield = useRef<Mesh>(null);
   const hitRemaining = useRef(0);
   const motionTime = useRef(0);
-  const [resources] = useState(() => ({
-    geometry: createCraftGeometry(),
-    cyan: new Color("#79ffff").multiplyScalar(2.8),
-    orange: new Color("#ff8158").multiplyScalar(3),
-  }));
+  const engines = useRef<(MeshBasicMaterial | null)[]>([]);
+  const lastCombo = useRef(-1);
+  const [resources] = useState(() => {
+    const geometry = createCraftGeometry();
+    return { geometry, edges: new EdgesGeometry(geometry, 15), cyan: new Color(THEME.palette.primary).multiplyScalar(THEME.glow.craft) };
+  });
 
-  useEffect(() => () => resources.geometry.dispose(), [resources]);
+  useEffect(() => () => { resources.geometry.dispose(); resources.edges.dispose(); }, [resources]);
 
   useEffect(() => simulation.subscribe((event) => {
     if (event.type === "hit") hitRemaining.current = GAME_CONFIG.effects.hitSeconds;
@@ -29,7 +31,13 @@ export function Player({ simulation }: { simulation: FlightSimulation }) {
   useFrame(({ camera, size }, delta) => {
     const state = simulation.state;
     if (state.status === "paused") return;
-    const reducedMotion = selectReducedMotion(simulation.store.getState());
+    const preferences = simulation.store.getState();
+    const tuning = DIFFICULTY_PRESETS[preferences.runDifficulty];
+    const reducedMotion = selectReducedMotion(preferences);
+    if (lastCombo.current !== preferences.combo) {
+      for (const material of engines.current) material?.color.set(comboColor(preferences.combo)).multiplyScalar(THEME.glow.engine);
+      lastCombo.current = preferences.combo;
+    }
     const frameDelta = Math.min(delta, GAME_CONFIG.physics.maximumFrameDelta);
     hitRemaining.current = Math.max(0, hitRemaining.current - frameDelta);
     if (!reducedMotion) motionTime.current += frameDelta;
@@ -52,8 +60,7 @@ export function Player({ simulation }: { simulation: FlightSimulation }) {
       cameraRoll + (idle ? Math.sin(motionTime.current * 0.27) * 0.016 : 0) + Math.sin(shakeTime * 0.7) * shake * 0.1);
 
     if (camera instanceof PerspectiveCamera) {
-      const speedRatio = (state.speed - GAME_CONFIG.speed.initial) /
-        (GAME_CONFIG.speed.maximum - GAME_CONFIG.speed.initial);
+      const speedRatio = (state.speed - tuning.initialSpeed) / (tuning.maximumSpeed - tuning.initialSpeed);
       const speedKick = speedRatio * 0.65 + MathUtils.smoothstep(speedRatio, 0.5, 1) * 0.35;
       const desiredFov = (mobile ? GAME_CONFIG.camera.mobileFov : GAME_CONFIG.camera.fov) +
         (reducedMotion ? 0 : speedKick * (GAME_CONFIG.camera.maximumFov - GAME_CONFIG.camera.fov));
@@ -76,32 +83,31 @@ export function Player({ simulation }: { simulation: FlightSimulation }) {
   });
 
   return (
-    <group ref={craft} position={[0, -GAME_CONFIG.flight.surfaceHeight, 0]}>
-      <mesh geometry={resources.geometry}>
-        <meshStandardMaterial color="#e5ede9" roughness={0.27} metalness={0.72} />
+    <group name="player-craft" ref={craft} position={[0, -GAME_CONFIG.flight.surfaceHeight, 0]}>
+      <mesh name="craft-hull" geometry={resources.geometry}>
+        <meshStandardMaterial color={THEME.palette.hull} roughness={0.36} metalness={0.72} flatShading />
       </mesh>
+      <lineSegments name="craft-edges" geometry={resources.edges}>
+        <lineBasicMaterial color={resources.cyan} toneMapped={false} />
+      </lineSegments>
       <mesh position={[0, 0.15, -0.1]} scale={[0.22, 0.11, 0.58]}>
         <octahedronGeometry />
-        <meshStandardMaterial color="#112f35" emissive="#2ce2e2" emissiveIntensity={0.55}
+        <meshStandardMaterial color={THEME.palette.glass} emissive={THEME.palette.primary} emissiveIntensity={THEME.glow.cockpit}
           roughness={0.15} metalness={0.8} />
       </mesh>
       {[-1, 1].map((side) => (
         <group key={side}>
-          <mesh position={[side * 0.48, -0.035, 0.4]} rotation={[0, side * -0.62, 0]}>
-            <boxGeometry args={[0.038, 0.025, 0.64]} />
-            <meshBasicMaterial color={resources.cyan} toneMapped={false} />
-          </mesh>
-          <mesh position={[side * 0.23, -0.06, 0.79]}>
+          <mesh name={`engine-${side}`} position={[side * 0.3, -0.045, 0.54]}>
             <boxGeometry args={[0.17, 0.1, 0.12]} />
-            <meshBasicMaterial color={resources.orange} toneMapped={false} />
+            <meshBasicMaterial ref={(material) => { engines.current[side === -1 ? 0 : 1] = material; }} color={resources.cyan} toneMapped={false} />
           </mesh>
         </group>
       ))}
       <mesh ref={shield} visible={false} scale={[1.08, 0.58, 1.28]}>
         <icosahedronGeometry args={[1, 1]} />
-        <meshBasicMaterial color="#95fff0" wireframe transparent opacity={0.45} toneMapped={false} />
+        <meshBasicMaterial color={THEME.palette.primary} wireframe transparent opacity={0.45} toneMapped={false} />
       </mesh>
-      <pointLight position={[0, 0.3, 0.2]} color="#b4ffff" intensity={16} distance={8} decay={2} />
+      <pointLight position={[0, 0.3, 0.2]} color={THEME.palette.primary} intensity={THEME.lighting.craft} distance={8} decay={2} />
     </group>
   );
 }

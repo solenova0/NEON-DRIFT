@@ -7,10 +7,12 @@ import { motion } from "framer-motion";
 import { DefaultLoadingManager } from "three";
 import { RotateCcw, Zap } from "lucide-react";
 import { FlightHud } from "@/components/FlightHud";
+import { PlaytestTools } from "@/components/PlaytestTools";
 import { useFlightAudio } from "@/hooks/useFlightAudio";
 import { useFlightInput } from "@/hooks/useFlightInput";
 import { useGamePreferences } from "@/hooks/useGamePreferences";
 import { useHighScorePersistence } from "@/hooks/useHighScorePersistence";
+import { usePlaytest } from "@/hooks/usePlaytest";
 import { FlightSimulation } from "@/game/simulation";
 import { selectReducedMotion } from "@/store/gameStore";
 import { GameStoreProvider, useGameStore } from "@/store/useGameStore";
@@ -119,6 +121,7 @@ function FlightSession({ simulation, surface, onError }: {
     <>
       <div className="scene-viewport"><GameScene simulation={simulation} onReady={completePhysicsLoading} onError={onError} /></div>
       <FlightHud simulation={simulation} />
+      <PlaytestTools simulation={simulation} />
       <SceneLoading />
     </>
   );
@@ -129,6 +132,7 @@ export default function NeonDrift() {
   const surface = useRef<HTMLElement>(null);
   useHighScorePersistence(simulation.store);
   useGamePreferences(simulation.store);
+  usePlaytest(simulation);
 
   return (
     <GameStoreProvider store={simulation.store}>

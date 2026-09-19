@@ -9,6 +9,7 @@ import { GAME_CONFIG } from "@/game/config";
 import type { FlightSimulation } from "@/game/simulation";
 import { selectReducedMotion } from "@/store/gameStore";
 import { useGameStore } from "@/store/useGameStore";
+import { comboColor } from "@/game/theme";
 
 const glassSurface = "rounded-md border border-[var(--line)] bg-[var(--glass)] shadow-[var(--glass-shadow)] backdrop-blur-xl";
 
@@ -31,7 +32,7 @@ function ComboBadge() {
 
   return (
     <motion.div animate={controls} className="combo-badge" data-testid="combo-badge" data-combo={combo}
-      style={{ color: combo > 1 ? "var(--lime)" : "var(--muted)" }} aria-label={`Combo multiplier ${combo}`}>
+      style={{ color: comboColor(combo) }} aria-label={`Combo multiplier ${combo}`}>
       <span className="combo-value">x{combo}</span>
       <div className="flex justify-center gap-1" aria-hidden="true">
         {Array.from({ length: GAME_CONFIG.scoring.orbsPerCombo }, (_, index) => (
@@ -145,7 +146,7 @@ function FlightHeader({ simulation }: { simulation: FlightSimulation }) {
       </button>
       <div className="sector-label"><span className="status-dot" /> THE CONDUIT <span className="sector-divider">/</span> SECTOR 01</div>
       <div className="header-actions">
-        <span className="build-label">FLIGHT SYSTEM 05</span>
+        <span className="build-label">FLIGHT SYSTEM 06</span>
         <MuteButton />
         <FullscreenButton />
         <button type="button" className="icon-button" disabled={status !== "playing" && status !== "paused"}
@@ -171,7 +172,7 @@ function GravityInstrument({ simulation }: { simulation: FlightSimulation }) {
       <div className="cooldown-control relative grid shrink-0 place-items-center">
         <svg viewBox="0 0 56 56" className="pointer-events-none absolute inset-0 h-full w-full -rotate-90"
           role="progressbar" aria-label="Flip cooldown" aria-valuemin={0} aria-valuemax={100} aria-valuenow={Math.round(charge * 100)}>
-          <circle cx="28" cy="28" r="25" fill="none" stroke="rgba(141,248,231,0.15)" strokeWidth="2" />
+          <circle cx="28" cy="28" r="25" fill="none" stroke="var(--line)" strokeWidth="2" />
           <motion.circle cx="28" cy="28" r="25" fill="none" stroke={flipping ? "var(--lime)" : "var(--cyan)"}
             strokeWidth="2" strokeLinecap="round" pathLength="1" strokeDasharray="1" initial={false}
             animate={{ strokeDashoffset: 1 - charge }} transition={{ duration: reducedMotion ? 0 : 0.1, ease: "linear" }} />
@@ -210,6 +211,46 @@ function SpeedInstrument() {
   );
 }
 
+function FlightNotices({ simulation }: { simulation: FlightSimulation }) {
+  const visible = useGameStore((state) => state.status === "playing" && state.elapsed >= GAME_CONFIG.onboarding.hintAt && state.flips === 0);
+  const flipping = useGameStore((state) => state.flipping);
+  const reducedMotion = useGameStore(selectReducedMotion);
+  const [closeBonus, setCloseBonus] = useState(0);
+  const flash = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    let animation: Animation | undefined;
+    const unsubscribe = simulation.subscribe((event) => {
+      if (event.type === "status" && event.status !== "playing") {
+        clearTimeout(timer);
+        animation?.cancel();
+        setCloseBonus(0);
+      }
+      if (event.type !== "nearMiss") return;
+      clearTimeout(timer);
+      setCloseBonus(event.bonus);
+      timer = setTimeout(() => setCloseBonus(0), GAME_CONFIG.nearMiss.popupSeconds * 1000);
+      if (!selectReducedMotion(simulation.store.getState())) {
+        animation?.cancel();
+        animation = flash.current?.animate([{ opacity: 0.3 }, { opacity: 0 }], { duration: GAME_CONFIG.nearMiss.slowSeconds * 1000, easing: "ease-out" });
+      }
+    });
+    return () => { unsubscribe(); clearTimeout(timer); animation?.cancel(); };
+  }, [simulation]);
+
+  return <>
+    <div ref={flash} className="near-miss-flash" aria-hidden="true" />
+    {closeBonus > 0 ? <motion.div className="close-call" role="status" style={{ x: "-50%" }}
+      initial={reducedMotion ? false : { opacity: 0, scale: 0.92 }} animate={{ opacity: 1, scale: 1 }} transition={{ duration: reducedMotion ? 0 : 0.12 }}>
+      <strong>CLOSE!</strong><span>+{closeBonus}</span>
+    </motion.div> : visible && <button type="button" className="flip-hint" disabled={flipping} onClick={() => simulation.requestFlip()}
+      title="Flip gravity (Space, W, up arrow, or swipe up)" aria-label="First flip: flip gravity">
+      <ArrowUpDown size={19} /><span>FLIP GRAVITY</span><kbd>SPACE</kbd>
+    </button>}
+  </>;
+}
+
 export function FlightHud({ simulation }: { simulation: FlightSimulation }) {
   const ready = useGameStore((state) => state.ready);
   const flash = useRef<HTMLDivElement>(null);
@@ -228,6 +269,7 @@ export function FlightHud({ simulation }: { simulation: FlightSimulation }) {
       <div className="flight-crosshair" aria-hidden="true"><Crosshair size={23} strokeWidth={1} /></div>
       <div className="sector-annotation" aria-hidden="true"><span>VECTOR</span><span>01 / ND</span><i /><span>LINK STABLE</span></div>
       <RunMenus simulation={simulation} />
+      <FlightNotices simulation={simulation} />
       <footer className="flight-footer">
         <GravityInstrument simulation={simulation} />
         <SteeringControls simulation={simulation} />

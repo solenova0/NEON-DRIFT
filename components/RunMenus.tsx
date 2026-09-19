@@ -2,9 +2,11 @@
 
 import { useEffect, useRef } from "react";
 import { AnimatePresence, motion } from "framer-motion";
-import { ArrowLeft, ArrowRight, Check, Home, Music2, Play, RotateCcw, Settings2, Sparkles, Trophy, Volume2, Waves, X } from "lucide-react";
+import { ArrowLeft, ArrowRight, ChartColumn, Check, Home, Mail, Music2, Play, RotateCcw, Settings2, Sparkles, Trophy, Volume2, Waves, X } from "lucide-react";
 import { AnimatedScore, formatScore } from "@/components/AnimatedScore";
+import { RunReportContent } from "@/components/PlaytestTools";
 import type { FlightSimulation } from "@/game/simulation";
+import { DIFFICULTY_PRESETS, type DifficultyPreset } from "@/game/config";
 import { DEFAULT_SETTINGS, selectEffectiveQuality, selectReducedMotion, type GameSettings } from "@/store/gameStore";
 import { useGameStore } from "@/store/useGameStore";
 
@@ -55,6 +57,14 @@ function SettingsContent() {
   return (
     <div className="settings-content">
       <fieldset className="settings-section quality-setting">
+        <legend>DIFFICULTY <span>NEXT RUN</span></legend>
+        <div className="quality-options">{(Object.keys(DIFFICULTY_PRESETS) as DifficultyPreset[]).map((difficulty) => (
+          <label key={difficulty} className="quality-option"><input type="radio" name="difficulty" value={difficulty}
+            checked={settings.difficulty === difficulty} onChange={() => updateSettings({ difficulty })} />
+            <span>{difficulty}<Check size={14} aria-hidden="true" /></span></label>
+        ))}</div>
+      </fieldset>
+      <fieldset className="settings-section quality-setting">
         <legend>GRAPHICS QUALITY <span className="uppercase">RENDERING: {quality}</span></legend>
         <div className="quality-options">
           {(["low", "medium", "high"] as const).map((quality) => (
@@ -93,6 +103,11 @@ function SettingsContent() {
         <input id="reduced-motion" type="checkbox" role="switch" checked={reducedMotion}
           onChange={(event) => updateSettings({ reducedMotion: event.target.checked })} />
       </label>
+      <label className="motion-setting audio-mute-setting" htmlFor="show-feedback">
+        <span><Mail size={17} />Feedback button</span>
+        <input id="show-feedback" type="checkbox" role="switch" checked={settings.showFeedback}
+          onChange={(event) => updateSettings({ showFeedback: event.target.checked })} />
+      </label>
     </div>
   );
 }
@@ -118,7 +133,7 @@ function LeaderboardContent() {
   );
 }
 
-function MenuDialog({ panel }: { panel: "settings" | "leaderboard" }) {
+function MenuDialog({ panel }: { panel: "settings" | "leaderboard" | "report" }) {
   const dialog = useRef<HTMLDialogElement>(null);
   const closePanel = useGameStore((state) => state.closePanel);
   const updateSettings = useGameStore((state) => state.updateSettings);
@@ -146,10 +161,10 @@ function MenuDialog({ panel }: { panel: "settings" | "leaderboard" }) {
       }}>
       <header className="panel-header">
         <div><div className="panel-kicker">{panel === "settings" ? "FLIGHT PREFERENCES" : "LOCAL RECORDS"}</div>
-          <h2 id="panel-title">{panel === "settings" ? <Settings2 size={22} /> : <Trophy size={22} />}{panel === "settings" ? "SETTINGS" : "LEADERBOARD"}</h2></div>
+          <h2 id="panel-title">{panel === "settings" ? <Settings2 size={22} /> : panel === "report" ? <ChartColumn size={22} /> : <Trophy size={22} />}{panel === "settings" ? "SETTINGS" : panel === "report" ? "RUN REPORT" : "LEADERBOARD"}</h2></div>
         <button type="button" className="icon-button" onClick={closePanel} aria-label="Close panel" title="Close panel"><X size={19} /></button>
       </header>
-      {panel === "settings" ? <SettingsContent /> : <LeaderboardContent />}
+      {panel === "settings" ? <SettingsContent /> : panel === "report" ? <RunReportContent /> : <LeaderboardContent />}
       <footer className="panel-footer">
         <button type="button" className="secondary-button" onClick={closePanel}><ArrowLeft size={16} />BACK</button>
         {panel === "settings" && <button type="button" className="icon-button" aria-label="Reset settings" title="Reset settings"

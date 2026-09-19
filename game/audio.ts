@@ -78,7 +78,7 @@ export class FlightAudio {
       this.status = event.status;
       this.syncPlayback();
       if (event.status === "gameOver" && previous !== "gameOver") this.playEffect("gameOver");
-    } else {
+    } else if (event.type !== "nearMiss") {
       this.playEffect(event.type);
     }
   }

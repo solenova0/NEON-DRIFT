@@ -3,9 +3,10 @@
 import { useEffect, useRef } from "react";
 import { useFrame } from "@react-three/fiber";
 import { AdditiveBlending, Color, DynamicDrawUsage, InstancedMesh, MathUtils, MeshBasicMaterial, Object3D } from "three";
-import { GAME_CONFIG, QUALITY_PRESETS } from "@/game/config";
+import { DIFFICULTY_PRESETS, GAME_CONFIG, QUALITY_PRESETS } from "@/game/config";
 import type { FlightSimulation } from "@/game/simulation";
 import { selectEffectiveQuality, selectReducedMotion } from "@/store/gameStore";
+import { THEME, comboColor } from "@/game/theme";
 
 export function FlightEffects({ simulation }: { simulation: FlightSimulation }) {
   const mesh = useRef<InstancedMesh>(null);
@@ -49,7 +50,7 @@ export function FlightEffects({ simulation }: { simulation: FlightSimulation }) 
         particle.maximumLife = particle.life;
         particle.radius = event.type === "hit" ? 0.09 : 0.075;
         particle.trail = false;
-        particle.color.set(event.type === "hit" ? "#ff926d" : "#d5fa87").multiplyScalar(2.6);
+        particle.color.set(event.type === "hit" ? THEME.palette.danger : THEME.palette.orb).multiplyScalar(THEME.glow.burst);
       }
       pool.colorDirty = true;
     });
@@ -63,9 +64,9 @@ export function FlightEffects({ simulation }: { simulation: FlightSimulation }) 
     const reducedMotion = selectReducedMotion(preferences);
     const preset = QUALITY_PRESETS[selectEffectiveQuality(preferences)];
     const budget = reducedMotion ? 0 : preset.particles;
-    const speedPower = MathUtils.smoothstep(state.speed, 29, GAME_CONFIG.speed.maximum);
+    const speedPower = MathUtils.smoothstep(state.speed, 29, DIFFICULTY_PRESETS[preferences.runDifficulty].maximumSpeed);
     mesh.current.count = budget;
-    const frameDelta = state.status === "paused" ? 0 : Math.min(delta, GAME_CONFIG.physics.maximumFrameDelta);
+    const frameDelta = state.status === "paused" ? 0 : Math.min(delta, GAME_CONFIG.physics.maximumFrameDelta) * (state.status === "playing" ? state.timeScale : 1);
     if (budget > 0 && (state.status === "playing" || state.status === "menu")) {
       const trailInterval = GAME_CONFIG.effects.trailInterval * GAME_CONFIG.effects.particleCount / budget;
       pool.trailElapsed += frameDelta;
@@ -73,9 +74,9 @@ export function FlightEffects({ simulation }: { simulation: FlightSimulation }) 
         pool.trailElapsed %= trailInterval;
         for (const side of [-1, 1]) {
           const particle = pool.particles[pool.cursor++ % budget];
-          particle.x = state.x + Math.cos(state.roll) * side * 0.23;
-          particle.y = state.y + Math.sin(state.roll) * side * 0.23;
-          particle.z = state.z + 0.86;
+          particle.x = state.x + Math.cos(state.roll) * side * 0.3;
+          particle.y = state.y + Math.sin(state.roll) * side * 0.3;
+          particle.z = state.z + 0.6;
           particle.velocityX = 0;
           particle.velocityY = 0;
           particle.velocityZ = 8 + speedPower * 8;
@@ -83,7 +84,7 @@ export function FlightEffects({ simulation }: { simulation: FlightSimulation }) 
           particle.maximumLife = particle.life;
           particle.radius = 0.052;
           particle.trail = true;
-          particle.color.set("#ffbd79").multiplyScalar(2.8);
+          particle.color.set(comboColor(preferences.combo)).multiplyScalar(THEME.glow.engine);
         }
         pool.colorDirty = true;
       }
@@ -133,7 +134,7 @@ export function FlightEffects({ simulation }: { simulation: FlightSimulation }) 
       </instancedMesh>
       <instancedMesh name="speed-lines" ref={speedLines} args={[undefined, undefined, QUALITY_PRESETS.high.speedLines]} frustumCulled={false} visible={false}>
         <boxGeometry />
-        <meshBasicMaterial ref={speedMaterial} color="#8df8e7" toneMapped={false} transparent opacity={0} depthWrite={false} blending={AdditiveBlending} />
+        <meshBasicMaterial ref={speedMaterial} color={THEME.palette.primary} toneMapped={false} transparent opacity={0} depthWrite={false} blending={AdditiveBlending} />
       </instancedMesh>
     </group>
   );

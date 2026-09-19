@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { GAME_CONFIG } from "./config.ts";
+import { DIFFICULTY_PRESETS, GAME_CONFIG, type DifficultyPreset } from "./config.ts";
 import { difficultyAt, distanceAtTime, timeAtDistance } from "./difficulty.ts";
 import { FlightSimulation, type GameEvent } from "./simulation.ts";
 
@@ -27,6 +27,7 @@ test("a flip makes a 0.3 second arc and rolls exactly 180 degrees", () => {
   assert.equal(simulation.invulnerable, true);
   advance(simulation, 0.15);
   assert.equal(simulation.state.y, GAME_CONFIG.flight.surfaceHeight);
+  assert.equal(simulation.store.getState().flips, 1);
   assert.equal(simulation.state.roll, Math.PI);
   assert.equal(simulation.state.z, 0);
   assert.equal(simulation.invulnerable, false);
@@ -75,13 +76,17 @@ test("four separated hits end the run and restart reuses the same pool", () => {
   simulation.start();
   const pool = simulation.pool;
   const slot = pool.obstacles[0];
+  let deathChunk = -1;
   for (let hit = 0; hit < 4; hit += 1) {
     const obstacle = pool.obstacles.find((candidate) => candidate.active && !candidate.spent)!;
+    deathChunk = obstacle.chunkIndex;
     assert.equal(simulation.hit(obstacle), true);
     advance(simulation, 1.2);
   }
   assert.equal(simulation.state.status, "gameOver");
   assert.equal(simulation.state.shield, 0);
+  assert.equal(simulation.store.getState().runHistory[0].ending, "death");
+  assert.equal(simulation.store.getState().runHistory[0].death?.chunkIndex, deathChunk);
   simulation.start();
   assert.equal(simulation.state.status, "playing");
   assert.equal(simulation.state.shield, 100);
@@ -117,19 +122,28 @@ test("lateral controls stay screen-relative after the camera flips", () => {
 });
 
 test("speed and density rise continuously with bounded frame-to-frame changes", () => {
-  let previous = difficultyAt(0);
-  assert.equal(previous.speed, GAME_CONFIG.speed.initial);
-  assert.equal(previous.density, GAME_CONFIG.spawn.density);
-  for (let frame = 1; frame <= 600 * 60; frame += 1) {
-    const current = difficultyAt(frame / 60);
-    assert.ok(current.speed >= previous.speed && current.speed <= GAME_CONFIG.speed.maximum);
-    assert.ok(current.density >= previous.density && current.density <= GAME_CONFIG.spawn.maximumDensity);
-    assert.ok(current.speed - previous.speed < 0.004);
-    assert.ok(current.density - previous.density < 0.0001);
-    previous = current;
-  }
-  for (const elapsed of [0, 3, 30, 90, 300, 600]) {
-    assert.ok(Math.abs(timeAtDistance(distanceAtTime(elapsed)) - elapsed) < 1e-6);
+  for (const preset of Object.keys(DIFFICULTY_PRESETS) as DifficultyPreset[]) {
+    const tuning = DIFFICULTY_PRESETS[preset];
+    const maximumSpeedRate = Math.max(1.5 * (tuning.cruiseSpeed - tuning.initialSpeed) / GAME_CONFIG.onboarding.seconds,
+      (tuning.maximumSpeed - tuning.cruiseSpeed) / tuning.timeConstant);
+    const maximumDensityRate = Math.max(1.5 * (tuning.cruiseDensity - tuning.initialDensity) / GAME_CONFIG.onboarding.seconds,
+      (tuning.maximumDensity - tuning.cruiseDensity) / tuning.timeConstant);
+    let previous = difficultyAt(0, preset);
+    assert.equal(previous.speed, tuning.initialSpeed);
+    assert.equal(previous.density, tuning.initialDensity);
+    for (let frame = 1; frame <= 600 * 60; frame += 1) {
+      const current = difficultyAt(frame / 60, preset);
+      assert.ok(current.speed >= previous.speed && current.speed <= tuning.maximumSpeed);
+      assert.ok(current.density >= previous.density && current.density <= tuning.maximumDensity);
+      assert.ok(current.speed - previous.speed <= maximumSpeedRate / 60 + 1e-10);
+      assert.ok(current.density - previous.density <= maximumDensityRate / 60 + 1e-10);
+      previous = current;
+    }
+    for (const elapsed of [0, 3, 19.99, 20, 20.01, 30, 90, 300, 600]) {
+      assert.ok(Math.abs(timeAtDistance(distanceAtTime(elapsed, preset), preset) - elapsed) < 1e-6);
+      const derivative = (distanceAtTime(elapsed + 0.0001, preset) - distanceAtTime(elapsed, preset)) / 0.0001;
+      assert.ok(Math.abs(derivative - difficultyAt(elapsed, preset).speed) < 0.0001);
+    }
   }
 });
 
@@ -170,4 +184,96 @@ test("store transitions reset or freeze the actual flight instead of a second li
   actions.startRun();
   advance(simulation, 1);
   assert.ok(Math.abs(simulation.state.distance - distance) < 1e-8);
+});
+
+test("difficulty is latched for each run and a finished flip unlocks patterns only once", () => {
+  const simulation = createSimulation();
+  simulation.store.getState().updateSettings({ difficulty: "intense" });
+  simulation.start();
+  assert.equal(simulation.state.speed, DIFFICULTY_PRESETS.intense.initialSpeed);
+  assert.equal(simulation.pool.difficulty, "intense");
+  simulation.store.getState().updateSettings({ difficulty: "chill" });
+  advance(simulation, 2);
+  assert.equal(simulation.state.speed, difficultyAt(simulation.state.time, "intense").speed);
+  simulation.requestFlip();
+  advance(simulation, 0.15);
+  assert.equal(simulation.pool.hasFlipped, false);
+  advance(simulation, 0.15);
+  assert.equal(simulation.pool.hasFlipped, true);
+  assert.equal(simulation.store.getState().flips, 1);
+  simulation.returnToMenu();
+  simulation.start();
+  assert.equal(simulation.state.speed, DIFFICULTY_PRESETS.chill.initialSpeed);
+  assert.equal(simulation.pool.hasFlipped, false);
+});
+
+function closePass(simulation: FlightSimulation, gap: number) {
+  const obstacle = simulation.pool.obstacles.find((slot) => slot.active && !slot.nearMissChecked)!;
+  simulation.state.distance = obstacle.distance;
+  simulation.checkNearMisses(() => gap);
+  simulation.state.distance += GAME_CONFIG.obstacles[obstacle.kind].z + GAME_CONFIG.flight.playerHalfExtents.z + 0.01;
+  simulation.checkNearMisses(() => gap);
+  return obstacle;
+}
+
+test("a near miss awards once after clearance and stays banked through pickups and telemetry", () => {
+  const simulation = createSimulation();
+  const events: GameEvent[] = [];
+  simulation.subscribe((event) => events.push(event));
+  simulation.start();
+  const obstacle = closePass(simulation, 0.12);
+  assert.equal(obstacle.nearMissChecked, true);
+  assert.equal(simulation.store.getState().nearMisses, 1);
+  assert.equal(simulation.store.getState().nearMissBonus, GAME_CONFIG.nearMiss.bonus);
+  simulation.checkNearMisses(() => 0.12);
+  closePass(simulation, 0.12);
+  assert.equal(simulation.store.getState().nearMisses, 1);
+  simulation.collect(simulation.pool.orbs[0]);
+  simulation.publishTelemetry();
+  const state = simulation.store.getState();
+  assert.equal(state.score, state.distanceScore + state.orbBonus + state.nearMissBonus);
+  assert.equal(events.filter((event) => event.type === "nearMiss").length, 1);
+  simulation.returnToMenu();
+  assert.equal(simulation.store.getState().runHistory[0].nearMisses, 1);
+  simulation.start();
+  assert.equal(simulation.store.getState().nearMissBonus, 0);
+  assert.equal(obstacle.nearMissChecked, false);
+});
+
+test("contacts, distant passes, and invulnerable flips never earn near-miss points", () => {
+  for (const gap of [-0.02, 0, 0.01, GAME_CONFIG.nearMiss.clearance + 0.01, Infinity]) {
+    const simulation = createSimulation();
+    simulation.start();
+    closePass(simulation, gap);
+    assert.equal(simulation.store.getState().nearMisses, 0);
+  }
+  const simulation = createSimulation();
+  simulation.start();
+  simulation.requestFlip();
+  closePass(simulation, 0.1);
+  assert.equal(simulation.store.getState().nearMisses, 0);
+});
+
+test("near-miss slow motion preserves active survival time, pauses, and respects reduced motion", () => {
+  const simulation = createSimulation();
+  simulation.start();
+  closePass(simulation, 0.1);
+  advance(simulation, 0.1);
+  assert.ok(Math.abs(simulation.state.aliveTime - 0.1) < 1e-8);
+  assert.ok(Math.abs(simulation.state.time - 0.1 * GAME_CONFIG.nearMiss.timeScale) < 1e-8);
+  simulation.pause();
+  const remaining = simulation.state.slowMotionRemaining;
+  advance(simulation, 1);
+  assert.equal(simulation.state.slowMotionRemaining, remaining);
+  simulation.togglePause();
+  advance(simulation, 0.3);
+  assert.equal(simulation.state.timeScale, 1);
+  simulation.returnToMenu();
+  assert.ok(simulation.store.getState().runHistory[0].duration > simulation.store.getState().runHistory[0].simulationTime);
+  simulation.store.getState().updateSettings({ reducedMotion: true });
+  simulation.start();
+  closePass(simulation, 0.1);
+  assert.equal(simulation.state.timeScale, 1);
+  assert.equal(simulation.state.slowMotionRemaining, 0);
+  assert.equal(simulation.store.getState().nearMisses, 1);
 });
