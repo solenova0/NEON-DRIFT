@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { GAME_CONFIG } from "./config.ts";
+import { difficultyAt, timeAtDistance } from "./difficulty.ts";
 import {
   INITIAL_ROUTE,
   canReachCell,
@@ -79,4 +80,27 @@ test("recycling and restarting mutate the fixed pool without replacing slots", (
   chunks.forEach((chunk, index) => assert.equal(pool.chunks[index], chunk));
   obstacles.forEach((obstacle, index) => assert.equal(pool.obstacles[index], obstacle));
   orbs.forEach((orb, index) => assert.equal(pool.orbs[index], orb));
+});
+
+test("spawn density follows arrival time smoothly across every chunk boundary", () => {
+  const chunk = createChunk(0);
+  let entry = { ...INITIAL_ROUTE };
+  let previousDensity = GAME_CONFIG.spawn.density as number;
+  let earlyObstacles = 0;
+  let lateObstacles = 0;
+  for (let index = 0; index < 80; index += 1) {
+    writeChunk(chunk, index, GAME_CONFIG.seed, entry);
+    assert.ok(validateChunk(chunk, entry).valid);
+    for (const row of chunk.rows) {
+      assert.equal(row.density, difficultyAt(timeAtDistance(row.orb.distance)).density);
+      assert.ok(row.density >= previousDensity);
+      assert.ok(row.density - previousDensity < (row.index === 0 ? 0.02 : 0.009));
+      previousDensity = row.density;
+      const occupied = row.obstacles.filter((slot) => slot.active).length;
+      if (index < 10) earlyObstacles += occupied;
+      if (index >= 70) lateObstacles += occupied;
+    }
+    entry = { ...chunk.rows.at(-1)!.route };
+  }
+  assert.ok(lateObstacles > earlyObstacles);
 });

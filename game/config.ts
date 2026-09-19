@@ -1,6 +1,9 @@
 export const GAME_CONFIG = {
   seed: 271828,
-  speed: { initial: 22, maximum: 40, acceleration: 0.22 },
+  speed: { initial: 22, maximum: 40 },
+  difficulty: { timeConstant: 90 },
+  scoring: { pointsPerMeter: 1, orbBonus: 100, orbsPerCombo: 3, maximumCombo: 5 },
+  persistence: { key: "neon-drift.high-score.v1", profileKey: "neon-drift.profile.v1", saveInterval: 1000 },
   flight: {
     lanes: [-3.2, 0, 3.2],
     surfaceHeight: 2.65,
@@ -16,7 +19,8 @@ export const GAME_CONFIG = {
     firstRowDistance: 72,
     recycleBehind: 14,
     visibleDistance: 190,
-    density: 0.62,
+    density: 0.38,
+    maximumDensity: 0.86,
   },
   obstacles: {
     block: { x: 1.16, y: 0.95, z: 0.85 },
@@ -34,13 +38,22 @@ export const GAME_CONFIG = {
     shakeStrength: 0.16,
     particleCount: 72,
     particleSeconds: 0.65,
+    trailInterval: 0.035,
   },
-  camera: { fov: 64, maximumFov: 76, distance: 11.5 },
+  camera: { fov: 64, maximumFov: 76, distance: 11.5, mobileFov: 78, mobileDistance: 14.5 },
   input: { swipeThreshold: 28, swipeMaximumSeconds: 0.7 },
 } as const;
 
 export type Surface = -1 | 1;
 export type ObstacleKind = "block" | "barrier" | "laser";
+
+export const QUALITY_PRESETS = {
+  low: { particles: 16, speedLines: 0, dpr: 1, bloom: 0, bloomLevels: 0 },
+  medium: { particles: 40, speedLines: 20, dpr: 1.25, bloom: 0.7, bloomLevels: 3 },
+  high: { particles: 72, speedLines: 36, dpr: 1.5, bloom: 1.05, bloomLevels: 5 },
+} as const;
+
+export type QualityPreset = keyof typeof QUALITY_PRESETS;
 
 export const OBSTACLE_CAPACITY =
   GAME_CONFIG.spawn.chunkCount *

@@ -1,4 +1,5 @@
 import { GAME_CONFIG, type ObstacleKind, type Surface } from "./config.ts";
+import { difficultyAt, timeAtDistance } from "./difficulty.ts";
 
 export interface RouteState {
   lane: number;
@@ -31,6 +32,7 @@ export interface OrbSlot {
 
 export interface PatternRow {
   index: number;
+  density: number;
   obstacles: ObstacleSlot[];
   orb: OrbSlot;
   route: RouteState;
@@ -165,6 +167,7 @@ export function createChunk(slot: number): Chunk {
       const rowId = slot * GAME_CONFIG.spawn.rowsPerChunk + rowSlot;
       return {
         index: -1,
+        density: GAME_CONFIG.spawn.density,
         route: { ...INITIAL_ROUTE },
         obstacles: Array.from({ length: GAME_CONFIG.spawn.cellsPerRow }, (_, cell) => ({
           id: rowId * GAME_CONFIG.spawn.cellsPerRow + cell,
@@ -218,6 +221,8 @@ export function writeChunk(chunk: Chunk, index: number, seed: number, entry: Rou
     });
 
     const distance = GAME_CONFIG.spawn.firstRowDistance + row.index * GAME_CONFIG.spawn.rowSpacing;
+    // Sample at arrival, not generation: pooled look-ahead must not create density tiers.
+    row.density = difficultyAt(timeAtDistance(distance)).density;
     for (const obstacle of row.obstacles) {
       obstacle.generation += 1;
       obstacle.distance = distance;
@@ -228,7 +233,7 @@ export function writeChunk(chunk: Chunk, index: number, seed: number, entry: Rou
         : row.index % 4 === 1 && obstacle.surface !== surface
           ? "barrier"
           : "block";
-      obstacle.active = obstacle.kind === "laser" || random() < GAME_CONFIG.spawn.density;
+      obstacle.active = obstacle.kind === "laser" || random() < row.density;
       if (obstacle.surface === surface && obstacle.lane === lane) obstacle.active = false;
     }
 

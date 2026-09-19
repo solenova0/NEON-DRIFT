@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef } from "react";
 import { useThree } from "@react-three/fiber";
 import {
   BallCollider,
@@ -17,38 +17,37 @@ import {
 import { GAME_CONFIG, OBSTACLE_CAPACITY, ORB_CAPACITY } from "@/game/config";
 import { obstacleX } from "@/game/patterns";
 import type { FlightSimulation } from "@/game/simulation";
-import { publishHud, useGameStore } from "@/store/useGameStore";
+import { useGameStore } from "@/store/useGameStore";
 
 const PLAYER_GROUPS = interactionGroups(0, [1, 2]);
 const OBSTACLE_GROUPS = interactionGroups(1, [0]);
 const ORB_GROUPS = interactionGroups(2, [0]);
 
-function SensorPool({ simulation }: { simulation: FlightSimulation }) {
+function SensorPool({ simulation, onReady }: { simulation: FlightSimulation; onReady: () => void }) {
   const { world, rapier } = useRapier();
   const renderer = useThree((state) => state.gl);
   const player = useRef<RapierRigidBody>(null);
   const playerCollider = useRef<RapierCollider>(null);
-  const [handles] = useState(() => ({
+  const handlesRef = useRef({
     obstacles: Array<RapierRigidBody | null>(OBSTACLE_CAPACITY).fill(null),
     obstacleColliders: Array<RapierCollider | null>(OBSTACLE_CAPACITY).fill(null),
     orbs: Array<RapierRigidBody | null>(ORB_CAPACITY).fill(null),
     generations: new Int32Array(OBSTACLE_CAPACITY).fill(-1),
     orbGenerations: new Int32Array(ORB_CAPACITY).fill(-1),
-    contacts: new Map<number, number>(),
+    colliderSlots: new Map<number, number>(),
     point: { x: 0, y: 0, z: 0 },
-  }));
+  });
 
   useEffect(() => {
-    useGameStore.setState({ ready: true });
+    simulation.store.getState().setReady(true);
+    onReady();
     if (process.env.NODE_ENV === "development") {
       Reflect.set(renderer.domElement, "__physicsWorld", world);
     }
-    return simulation.subscribe((event) => {
-      if (event.type === "status" && simulation.state.time === 0) handles.contacts.clear();
-    });
-  }, [simulation, handles, renderer, world]);
+  }, [simulation, renderer, world, onReady]);
 
   useBeforePhysicsStep(() => {
+    const handles = handlesRef.current;
     simulation.step(GAME_CONFIG.physics.step);
     const state = simulation.state;
     const point = handles.point;
@@ -67,7 +66,6 @@ function SensorPool({ simulation }: { simulation: FlightSimulation }) {
         positionZ < GAME_CONFIG.spawn.recycleBehind;
       if (!enabled) {
         if (body.isEnabled()) body.setEnabled(false);
-        handles.contacts.delete(slot.id);
         continue;
       }
 
@@ -76,7 +74,6 @@ function SensorPool({ simulation }: { simulation: FlightSimulation }) {
       point.z = positionZ;
       const recycled = handles.generations[slot.id] !== slot.generation;
       if (recycled || !body.isEnabled()) {
-        handles.contacts.delete(slot.id);
         collider.setHalfExtents(GAME_CONFIG.obstacles[slot.kind]);
         body.setTranslation(point, true);
         body.setEnabled(true);
@@ -109,16 +106,14 @@ function SensorPool({ simulation }: { simulation: FlightSimulation }) {
 
   useAfterPhysicsStep(() => {
     if (!playerCollider.current) return;
-    // Recheck sustained overlaps when flip or hit invulnerability expires.
-    for (const [id, generation] of handles.contacts) {
-      const slot = simulation.pool.obstacles[id];
-      const collider = handles.obstacleColliders[id];
-      if (slot.generation !== generation || !collider || !world.intersectionPair(collider, playerCollider.current)) {
-        handles.contacts.delete(id);
-      } else {
-        simulation.hit(slot);
-      }
-    }
+    const handles = handlesRef.current;
+    // Pooled sensors can stay intersecting across a restart or invulnerability window.
+    world.intersectionPairsWith(playerCollider.current, (collider) => {
+      const slotId = handles.colliderSlots.get(collider.handle);
+      if (slotId === undefined) return;
+      if (slotId >= 0) simulation.hit(simulation.pool.obstacles[slotId]);
+      else simulation.collect(simulation.pool.orbs[-slotId - 1]);
+    });
   });
 
   const collisionTypes = rapier.ActiveCollisionTypes.ALL;
@@ -133,37 +128,35 @@ function SensorPool({ simulation }: { simulation: FlightSimulation }) {
       </RigidBody>
       {simulation.pool.obstacles.map((slot) => (
         <RigidBody key={slot.id} type="kinematicPosition" colliders={false} canSleep={false}
-          position={[0, 0, -1000]} ref={(body) => { handles.obstacles[slot.id] = body; }}>
+          position={[0, 0, -1000]} ref={(body) => { handlesRef.current.obstacles[slot.id] = body; }}>
           <CuboidCollider args={[1, 1, 1]} sensor collisionGroups={OBSTACLE_GROUPS}
             activeCollisionTypes={collisionTypes}
-            ref={(collider) => { handles.obstacleColliders[slot.id] = collider; }}
-            onIntersectionEnter={() => {
-              handles.contacts.set(slot.id, slot.generation);
-              simulation.hit(slot);
-            }}
-            onIntersectionExit={() => { handles.contacts.delete(slot.id); }} />
+            ref={(collider) => {
+              handlesRef.current.obstacleColliders[slot.id] = collider;
+              if (collider) handlesRef.current.colliderSlots.set(collider.handle, slot.id);
+            }} />
         </RigidBody>
       ))}
       {simulation.pool.orbs.map((slot) => (
         <RigidBody key={slot.id} type="kinematicPosition" colliders={false} canSleep={false}
-          position={[0, 0, -1000]} ref={(body) => { handles.orbs[slot.id] = body; }}>
+          position={[0, 0, -1000]} ref={(body) => { handlesRef.current.orbs[slot.id] = body; }}>
           <BallCollider args={[GAME_CONFIG.orbs.radius]} sensor collisionGroups={ORB_GROUPS}
-            activeCollisionTypes={collisionTypes} onIntersectionEnter={() => simulation.collect(slot)} />
+            activeCollisionTypes={collisionTypes} ref={(collider) => {
+              if (collider) handlesRef.current.colliderSlots.set(collider.handle, -slot.id - 1);
+            }} />
         </RigidBody>
       ))}
     </>
   );
 }
 
-export function PhysicsWorld({ simulation }: { simulation: FlightSimulation }) {
+export function PhysicsWorld({ simulation, onReady }: { simulation: FlightSimulation; onReady: () => void }) {
   const status = useGameStore((state) => state.status);
-
-  useEffect(() => simulation.subscribe(() => publishHud(simulation)), [simulation]);
 
   return (
     <Physics gravity={[0, 0, 0]} timeStep={GAME_CONFIG.physics.step} interpolate={false}
-      updatePriority={-50} paused={status !== "running"}>
-      <SensorPool simulation={simulation} />
+      updatePriority={-50} paused={status !== "playing"}>
+      <SensorPool simulation={simulation} onReady={onReady} />
     </Physics>
   );
 }

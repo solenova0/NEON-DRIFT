@@ -14,10 +14,20 @@ export function useFlightInput(
     let gesture: { id: number; x: number; y: number; time: number } | null = null;
 
     function onKeyDown(event: KeyboardEvent) {
+      const state = simulation.store.getState();
+      if (state.panel !== null) {
+        if (event.code === "Escape") {
+          event.preventDefault();
+          state.closePanel();
+        }
+        return;
+      }
       if (event.target instanceof Element && event.target.closest("input, textarea, select, [contenteditable=true]")) return;
+      if (event.code === "Enter" && event.target instanceof Element && event.target.closest("button, a")) return;
       const supported = ["Space", "ArrowLeft", "ArrowRight", "ArrowUp", "KeyA", "KeyD", "KeyW", "Escape", "KeyP", "Enter"];
       if (!supported.includes(event.code)) return;
-      if (event.code === "Space" && event.target instanceof Element && event.target.closest("button")) return;
+      if (event.code === "Space" && simulation.state.status !== "playing" &&
+        event.target instanceof Element && event.target.closest("button")) return;
       event.preventDefault();
       if (event.repeat) return;
       if (event.code === "ArrowLeft" || event.code === "KeyA") simulation.moveLane(-1);
@@ -32,7 +42,8 @@ export function useFlightInput(
 
     function onPointerDown(event: PointerEvent) {
       if (event.pointerType === "mouse" || !event.isPrimary) return;
-      if (event.target instanceof Element && event.target.closest("button, a")) return;
+      if (simulation.state.status !== "playing" || simulation.store.getState().panel !== null) return;
+      if (event.target instanceof Element && event.target.closest("button, a, input, textarea, select, dialog")) return;
       gesture = { id: event.pointerId, x: event.clientX, y: event.clientY, time: performance.now() };
       surface!.setPointerCapture(event.pointerId);
     }

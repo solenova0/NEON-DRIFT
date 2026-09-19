@@ -1,4 +1,6 @@
 import { GAME_CONFIG, type Surface } from "./config.ts";
+import { difficultyAt, distanceAtTime } from "./difficulty.ts";
+import { createGameStore, type GameStatus, type GameStore } from "../store/gameStore.ts";
 import {
   createChunkPool,
   recycleChunks,
@@ -7,17 +9,16 @@ import {
   type OrbSlot,
 } from "./patterns.ts";
 
-export type RunStatus = "ready" | "running" | "paused" | "gameover";
-
 export interface FlightState {
-  status: RunStatus;
+  readonly status: GameStatus;
   time: number;
   distance: number;
   speed: number;
-  shield: number;
-  energy: number;
-  hits: number;
-  pickups: number;
+  density: number;
+  readonly shield: number;
+  readonly energy: number;
+  readonly hits: number;
+  readonly pickups: number;
   x: number;
   y: number;
   z: number;
@@ -39,20 +40,16 @@ export interface FlightState {
 
 export type GameEvent =
   | { type: "hit"; shield: number; x: number; y: number; z: number }
-  | { type: "collect"; energy: number; x: number; y: number; z: number }
+  | { type: "collect"; energy: number; score: number; combo: number; bonus: number; x: number; y: number; z: number }
   | { type: "flip"; surface: Surface }
-  | { type: "status"; status: RunStatus };
+  | { type: "status"; status: GameStatus };
 
-function initialState(): FlightState {
+function initialMotion(): Omit<FlightState, "status" | "shield" | "energy" | "hits" | "pickups"> {
   return {
-    status: "ready",
     time: 0,
     distance: 0,
     speed: GAME_CONFIG.speed.initial,
-    shield: GAME_CONFIG.shield.maximum,
-    energy: 0,
-    hits: 0,
-    pickups: 0,
+    density: GAME_CONFIG.spawn.density,
     x: 0,
     y: -GAME_CONFIG.flight.surfaceHeight,
     z: 0,
@@ -78,9 +75,29 @@ function smoothstep(progress: number) {
 }
 
 export class FlightSimulation {
-  readonly state = initialState();
+  readonly state: FlightState;
+  readonly store: GameStore;
   readonly pool = createChunkPool();
   private readonly listeners = new Set<(event: GameEvent) => void>();
+
+  constructor(store: GameStore = createGameStore()) {
+    this.store = store;
+    this.state = {
+      ...initialMotion(),
+      get status() { return store.getState().status; },
+      get shield() { return store.getState().shield; },
+      get energy() { return store.getState().energy; },
+      get hits() { return store.getState().hits; },
+      get pickups() { return store.getState().pickups; },
+    };
+    store.subscribe((current, previous) => {
+      if (current.runId !== previous.runId) {
+        Object.assign(this.state, initialMotion());
+        resetChunkPool(this.pool);
+      }
+      if (current.status !== previous.status) this.emit({ type: "status", status: current.status });
+    });
+  }
 
   subscribe(listener: (event: GameEvent) => void) {
     this.listeners.add(listener);
@@ -92,24 +109,39 @@ export class FlightSimulation {
   }
 
   start() {
-    if (this.state.status !== "ready" && this.state.status !== "gameover") return;
-    Object.assign(this.state, initialState(), { status: "running" });
-    resetChunkPool(this.pool);
-    this.emit({ type: "status", status: "running" });
+    return this.store.getState().startRun();
   }
 
   togglePause() {
-    if (this.state.status !== "running" && this.state.status !== "paused") return;
-    this.state.status = this.state.status === "running" ? "paused" : "running";
-    this.emit({ type: "status", status: this.state.status });
+    if (this.state.status === "playing") this.pause();
+    else this.store.getState().resumeRun();
   }
 
   pause() {
-    if (this.state.status === "running") this.togglePause();
+    this.publishTelemetry();
+    return this.store.getState().pauseRun();
+  }
+
+  returnToMenu() {
+    this.publishTelemetry();
+    return this.store.getState().returnToMenu();
+  }
+
+  publishTelemetry() {
+    const state = this.state;
+    this.store.getState().syncTelemetry({
+      elapsed: state.time,
+      distance: state.distance,
+      speed: state.speed,
+      density: state.density,
+      surface: state.surface,
+      flipping: state.flipping,
+      flipCharge: 1 - (state.flipReadyAt - state.time) / GAME_CONFIG.flip.cooldown,
+    });
   }
 
   moveLane(direction: -1 | 1) {
-    if (this.state.status !== "running") return false;
+    if (this.state.status !== "playing") return false;
     const screenDirection = Math.cos(this.state.roll) < 0 ? -direction : direction;
     const lane = Math.max(0, Math.min(2, this.state.lane + screenDirection));
     if (lane === this.state.lane) return false;
@@ -125,7 +157,7 @@ export class FlightSimulation {
 
   requestFlip() {
     const state = this.state;
-    if (state.status !== "running" || state.flipping || state.time + 1e-8 < state.flipReadyAt) {
+    if (state.status !== "playing" || state.flipping || state.time + 1e-8 < state.flipReadyAt) {
       return false;
     }
     state.flipping = true;
@@ -134,6 +166,7 @@ export class FlightSimulation {
     state.surface = -state.surface as Surface;
     state.flipStartRoll = state.roll;
     state.flipReadyAt = state.time + GAME_CONFIG.flip.cooldown;
+    this.publishTelemetry();
     this.emit({ type: "flip", surface: state.surface });
     return true;
   }
@@ -143,33 +176,30 @@ export class FlightSimulation {
   }
 
   hit(obstacle: ObstacleSlot) {
-    if (this.state.status !== "running" || !obstacle.active || obstacle.spent || this.invulnerable) {
+    if (this.state.status !== "playing" || !obstacle.active || obstacle.spent || this.invulnerable) {
       return false;
     }
     obstacle.spent = true;
-    this.state.shield = Math.max(0, this.state.shield - GAME_CONFIG.shield.hitDamage);
-    this.state.hits += 1;
+    this.publishTelemetry();
+    this.store.getState().recordHit();
     this.state.lastHitAt = this.state.time;
     this.state.invulnerableUntil = this.state.time + GAME_CONFIG.shield.recoverySeconds;
     this.emit({
       type: "hit", shield: this.state.shield,
       x: this.state.x, y: this.state.y, z: this.state.z,
     });
-    if (this.state.shield === 0) {
-      this.state.status = "gameover";
-      this.emit({ type: "status", status: "gameover" });
-    }
     return true;
   }
 
   collect(orb: OrbSlot) {
-    if (this.state.status !== "running" || !orb.active || orb.collected) return false;
+    if (this.state.status !== "playing" || !orb.active || orb.collected) return false;
     orb.collected = true;
-    this.state.energy += GAME_CONFIG.orbs.energy;
-    this.state.pickups += 1;
+    this.publishTelemetry();
+    const bonus = this.store.getState().collectOrb();
+    const { score, combo } = this.store.getState();
     this.state.lastCollectAt = this.state.time;
     this.emit({
-      type: "collect", energy: this.state.energy,
+      type: "collect", energy: this.state.energy, score, combo, bonus,
       x: this.state.x, y: this.state.y, z: this.state.z,
     });
     return true;
@@ -177,14 +207,13 @@ export class FlightSimulation {
 
   step(seconds: number) {
     const state = this.state;
-    if (state.status !== "running" || seconds <= 0) return;
+    if (state.status !== "playing" || !Number.isFinite(seconds) || seconds <= 0) return;
+    const previousTime = state.time;
     state.time += seconds;
-    const previousSpeed = state.speed;
-    state.speed = Math.min(
-      GAME_CONFIG.speed.maximum,
-      GAME_CONFIG.speed.initial + state.time * GAME_CONFIG.speed.acceleration,
-    );
-    state.distance += ((previousSpeed + state.speed) / 2) * seconds;
+    const difficulty = difficultyAt(state.time);
+    state.speed = difficulty.speed;
+    state.density = difficulty.density;
+    state.distance += distanceAtTime(state.time) - distanceAtTime(previousTime);
 
     state.laneElapsed = Math.min(state.laneDuration, state.laneElapsed + seconds);
     const laneProgress = state.laneDuration === 0 ? 1 : smoothstep(state.laneElapsed / state.laneDuration);
